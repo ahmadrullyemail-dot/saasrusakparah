@@ -1,0 +1,2215 @@
+require('dotenv').config();
+
+const crypto = require('node:crypto');
+const express = require('express');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const { pool, initializeDatabase } = require('./db');
+
+const app = express();
+const PORT = Number(process.env.PORT || 4000);
+const COOKIE_NAME = 'hrd_session';
+const MAX_PROFILE_PHOTO_BYTES = 900 * 1024;
+const WORKER_STATUSES = new Set(['offered', 'preactive', 'active', 'inactive']);
+const DOCUMENT_STATUSES = new Set(['pending', 'valid', 'expired', 'rejected']);
+const CONTRACT_TYPES = new Set(['pkwt', 'pkwtt', 'freelance', 'daily_worker']);
+const ALLOWED_TRANSITIONS = {
+  offered: ['preactive', 'inactive'],
+  preactive: ['active', 'inactive'],
+  active: ['inactive'],
+  inactive: ['active'],
+};
+
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  credentials: true,
+}));
+app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
+
+const profilePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_PROFILE_PHOTO_BYTES, files: 1 },
+});
+const attendanceEvidenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_PROFILE_PHOTO_BYTES, files: 1 },
+});
+const ATTENDANCE_ACTIVITIES = new Set(['check_in', 'check_out', 'off', 'permission', 'leave', 'sick']);
+const EMPLOYEE_REQUEST_TYPES = new Set(['off', 'permission', 'leave', 'sick']);
+
+function profilePhotoUrl(user) {
+  if (user.profile_photo_updated_at) return '/api/profile/photo';
+  return user.profile_photo_url || null;
+}
+
+function profilePhotoMimeType(file) {
+  if (!Buffer.isBuffer(file)) return null;
+  if (file.length >= 8 && file.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png';
+  }
+  if (file.length >= 3 && file[0] === 0xff && file[1] === 0xd8 && file[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  return null;
+}
+
+function distanceInMeters(latitude1, longitude1, latitude2, longitude2) {
+  const radians = (degrees) => (degrees * Math.PI) / 180;
+  const earthRadiusMeters = 6371000;
+  const latitudeDelta = radians(latitude2 - latitude1);
+  const longitudeDelta = radians(longitude2 - longitude1);
+  const haversine = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(radians(latitude1)) * Math.cos(radians(latitude2))
+    * Math.sin(longitudeDelta / 2) ** 2;
+  return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function parseAllowedActivities(value) {
+  if (!Array.isArray(value)
+    || value.some((activity) => !ATTENDANCE_ACTIVITIES.has(activity))
+    || new Set(value).size !== value.length) return null;
+  return value;
+}
+
+function matchRequiredAttendanceLocation(latitude, longitude, locations, activity) {
+  const requiredLocations = locations.filter((location) => {
+    const activities = Array.isArray(location.allowed_activities)
+      ? location.allowed_activities
+      : JSON.parse(location.allowed_activities);
+    return activities.includes(activity);
+  });
+  if (!requiredLocations.length) return { isRequired: false, location: null };
+  const location = requiredLocations.find((candidate) => distanceInMeters(
+    latitude,
+    longitude,
+    Number(candidate.latitude),
+    Number(candidate.longitude)
+  ) <= Number(candidate.radius_meters));
+  return { isRequired: true, location: location || null };
+}
+
+function validAttendanceLocationInput(input) {
+  return typeof input.name === 'string' && input.name.trim().length > 0 && input.name.trim().length <= 100
+    && typeof input.latitude === 'number' && Number.isFinite(input.latitude)
+    && typeof input.longitude === 'number' && Number.isFinite(input.longitude)
+    && validCoordinates(input.latitude, input.longitude)
+    && Number.isInteger(input.radius_meters) && input.radius_meters >= 25 && input.radius_meters <= 5000
+    && Boolean(parseAllowedActivities(input.allowed_activities));
+}
+
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error('JWT_SECRET must be set to a random value with at least 32 characters');
+  }
+  return secret;
+}
+
+function createSessionCookie(res, user) {
+  const token = jwt.sign(
+    { sub: String(user.id), tenantId: String(user.tenant_id), sessionVersion: user.token_version || 0 },
+    getJwtSecret(),
+    { expiresIn: '8h', issuer: 'hrd-management' }
+  );
+  res.cookie(COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 8 * 60 * 60 * 1000,
+  });
+}
+
+function asyncRoute(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
+function requireAuth(req, res, next) {
+  try {
+    const token = req.cookies[COOKIE_NAME];
+    if (!token) return res.status(401).json({ error: 'Authentication required' });
+    const payload = jwt.verify(token, getJwtSecret(), { issuer: 'hrd-management' });
+    return pool.execute(
+      `SELECT id, tenant_id, full_name, email, role, profile_photo_url,
+              profile_photo_updated_at, is_active, token_version
+         FROM users WHERE id = ? AND tenant_id = ?`,
+      [String(payload.sub), String(payload.tenantId)]
+    ).then(([rows]) => {
+      const user = rows[0];
+      if (!user || !user.is_active || Number(user.token_version) !== Number(payload.sessionVersion)) {
+        res.clearCookie(COOKIE_NAME, {
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production',
+        });
+        return res.status(401).json({ error: 'Session is invalid or account is inactive' });
+      }
+      req.auth = {
+        userId: String(user.id),
+        tenantId: String(user.tenant_id),
+        fullName: user.full_name,
+        email: user.email,
+        role: user.role,
+        profilePhotoUrl: profilePhotoUrl(user),
+        tokenVersion: Number(user.token_version),
+      };
+      next();
+    }).catch(next);
+  } catch (error) {
+    if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError) {
+      return res.status(401).json({ error: 'Session is invalid or expired' });
+    }
+    next(error);
+  }
+}
+
+function requireManager(req, res, next) {
+  if (!['admin', 'hr_manager'].includes(req.auth.role)) {
+    return res.status(403).json({ error: 'Manager permission required' });
+  }
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (req.auth.role !== 'admin') {
+    return res.status(403).json({ error: 'Administrator permission required' });
+  }
+  next();
+}
+
+function validPassword(value) {
+  return typeof value === 'string'
+    && value.length >= 12
+    && Buffer.byteLength(value, 'utf8') <= 72;
+}
+
+function validProfilePhotoUrl(value) {
+  if (value == null || value === '') return true;
+  if (typeof value !== 'string' || value.length > 2048) return false;
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function validDate(value) {
+  return value == null || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
+    && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value);
+}
+
+function validDocumentWarningThreshold(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 365;
+}
+
+function attendanceMonthRange(value) {
+  if (typeof value !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return null;
+  const [year, month] = value.split('-').map(Number);
+  if (year < 1000 || (year === 9999 && month === 12)) return null;
+  const start = `${value}-01`;
+  const nextMonth = new Date(Date.UTC(year, month, 1));
+  const end = `${nextMonth.toISOString().slice(0, 10)}`;
+  return {
+    month: value,
+    start,
+    end,
+    days: new Date(Date.UTC(year, month, 0)).getUTCDate(),
+  };
+}
+
+function validWorkerId(value) {
+  if (typeof value !== 'string' || !/^[1-9]\d{0,19}$/.test(value)) return false;
+  return BigInt(value) <= 18446744073709551615n;
+}
+
+function validCoordinates(latitude, longitude) {
+  return typeof latitude === 'number' && Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
+    && typeof longitude === 'number' && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+}
+
+function validPhoneNumber(value) {
+  return typeof value === 'string' && /^\+?[\d\s().-]{8,30}$/.test(value.trim());
+}
+
+function validNationalId(value) {
+  return value == null || value === '' || (typeof value === 'string' && /^\d{16}$/.test(value));
+}
+
+function validDepartment(value) {
+  return typeof value === 'string' && Boolean(value.trim()) && value.trim().length <= 150;
+}
+
+function normalizeText(value) {
+  if (typeof value !== 'string') return value;
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
+}
+
+function normalizeDocumentTypeName(value) {
+  return normalizeText(value);
+}
+
+function validSalaryRate(value) {
+  return value == null || value === ''
+    || (typeof value === 'string' && /^\d{1,13}(\.\d{1,2})?$/.test(value));
+}
+
+function validRequiredDocuments(value) {
+  return Array.isArray(value)
+    && value.every((type) => typeof type === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(type))
+    && new Set(value).size === value.length;
+}
+
+function documentTypeCode(name, existingCodes = []) {
+  const base = normalizeText(name)
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .replace(/-/g, '_')
+    .slice(0, 64) || 'document';
+  const existing = new Set(existingCodes);
+  if (!existing.has(base)) return base;
+  for (let suffix = 2; ; suffix += 1) {
+    const numbered = `${base.slice(0, 64 - String(suffix).length - 1)}_${suffix}`;
+    if (!existing.has(numbered)) return numbered;
+  }
+}
+
+function parseRequiredDocuments(value) {
+  return Array.isArray(value) ? value : JSON.parse(value);
+}
+
+function canTransitionStatus(previousStatus, nextStatus) {
+  return ALLOWED_TRANSITIONS[previousStatus]?.includes(nextStatus) || false;
+}
+
+function hashEmail(email) {
+  return crypto.createHash('sha256').update(email.trim().toLowerCase(), 'utf8').digest();
+}
+
+function hashNormalizedText(value) {
+  return crypto.createHash('sha256').update(normalizeText(value), 'utf8').digest();
+}
+
+function validAttendanceToken(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+
+function createAttendanceToken(tenantId, workerId, salt, secret = getJwtSecret()) {
+  if (!Buffer.isBuffer(salt) || salt.length !== 32) {
+    throw new Error('Attendance token salt must be exactly 32 bytes');
+  }
+  const message = `hrd-attendance-v1\0${tenantId}\0${workerId}\0${salt.toString('hex')}`;
+  return crypto.createHmac('sha256', secret).update(message, 'utf8').digest('base64url');
+}
+
+function hashAttendanceToken(token) {
+  if (!validAttendanceToken(token)) return null;
+  return crypto.createHash('sha256').update(token, 'ascii').digest();
+}
+
+function attendanceTokenMatches(receivedToken, expectedToken, storedHash) {
+  if (!validAttendanceToken(receivedToken) || !validAttendanceToken(expectedToken)
+    || !Buffer.isBuffer(storedHash) || storedHash.length !== 32) return false;
+  const received = Buffer.from(receivedToken, 'ascii');
+  const expected = Buffer.from(expectedToken, 'ascii');
+  const expectedHash = hashAttendanceToken(expectedToken);
+  return crypto.timingSafeEqual(received, expected)
+    && crypto.timingSafeEqual(expectedHash, storedHash);
+}
+
+async function activeDocumentTypes(tenantId, connection = pool) {
+  const [rows] = await connection.execute(
+    'SELECT code FROM document_types WHERE tenant_id = ? AND is_active = 1',
+    [tenantId]
+  );
+  return new Set(rows.map(({ code }) => code));
+}
+
+function redactWorkerForViewer(worker, role) {
+  if (role !== 'viewer') return worker;
+  const {
+    phone_number,
+    national_id,
+    address,
+    salary_rate,
+    ...workerData
+  } = worker;
+  return workerData;
+}
+
+async function getWorker(tenantId, workerId, connection = pool, lock = false) {
+  const [rows] = await connection.execute(
+    `SELECT * FROM workers WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL${lock ? ' FOR UPDATE' : ''}`,
+    [workerId, tenantId]
+  );
+  return rows[0] || null;
+}
+
+async function listWorkerDocuments(tenantId, workerId, connection = pool) {
+  const [rows] = await connection.execute(
+    `SELECT id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date, created_at, updated_at
+       FROM documents WHERE tenant_id = ? AND worker_id = ? AND deleted_at IS NULL ORDER BY id DESC`,
+    [tenantId, workerId]
+  );
+  return rows.map((document) => ({
+    ...document,
+    valid_from: document.valid_from ? String(document.valid_from).slice(0, 10) : null,
+    valid_until: document.valid_until ? String(document.valid_until).slice(0, 10) : null,
+    target_completion_date: document.target_completion_date ? String(document.target_completion_date).slice(0, 10) : null,
+  }));
+}
+
+function documentDateFields(status, { valid_from, valid_until, target_completion_date }) {
+  if (status === 'pending') {
+    const targetDate = target_completion_date || null;
+    if (!validDate(targetDate)) return null;
+    return {
+      valid_from: null,
+      valid_until: null,
+      target_completion_date: targetDate,
+    };
+  }
+  if (status === 'rejected') {
+    return { valid_from: null, valid_until: null, target_completion_date: null };
+  }
+  const validFrom = valid_from || null;
+  const validUntil = valid_until || null;
+  if (!validDate(validFrom) || !validDate(validUntil)
+    || (validFrom && validUntil && validFrom > validUntil)) {
+    return null;
+  }
+  return {
+    valid_from: validFrom,
+    valid_until: validUntil,
+    target_completion_date: null,
+  };
+}
+
+function evaluateEligibility(worker, documents, today = new Date().toISOString().slice(0, 10)) {
+  const required = parseRequiredDocuments(worker.required_document_types);
+  const checks = required.map((type) => {
+    const requiresExpiry = ['mcu', 'pkwt', 'sim'].includes(type);
+    const latest = documents.find((document) => document.type === type);
+    const current = latest
+      && latest.status === 'valid'
+      && (!requiresExpiry || latest.valid_until)
+      && (!latest.valid_from || latest.valid_from <= today)
+      && (!latest.valid_until || latest.valid_until >= today)
+      ? latest
+      : null;
+    return { type, valid: Boolean(current), document_id: current?.id || null };
+  });
+  return {
+    eligible: checks.every((check) => check.valid),
+    required_documents: required,
+    checks,
+  };
+}
+
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+app.get('/api/public/attendance', asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  const { worker_id: workerId, token } = req.query;
+  if (!validWorkerId(workerId) || !validAttendanceToken(token)) {
+    return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+  }
+  const [rows] = await pool.execute(
+    `SELECT w.id AS worker_id, w.tenant_id, w.full_name, w.position, t.name AS company_name,
+            s.token_salt, l.token_hash,
+            DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS attendance_date,
+            a.status, a.attendance_type, a.approval_status, a.approval_note,
+            a.check_in_time, a.check_out_time, a.location_id,
+            a.check_in_latitude, a.check_in_longitude,
+            a.check_out_latitude, a.check_out_longitude,
+            IF(a.evidence_data IS NULL, 0, 1) AS has_evidence
+       FROM workers w
+       JOIN tenant_attendance_settings s ON s.tenant_id = w.tenant_id
+       JOIN worker_attendance_links l ON w.id = l.worker_id AND w.tenant_id = l.tenant_id
+       JOIN tenants t ON t.id = l.tenant_id
+       LEFT JOIN attendance a ON a.tenant_id = l.tenant_id AND a.worker_id = l.worker_id
+         AND a.attendance_date = CURDATE() AND a.deleted_at IS NULL
+      WHERE w.id = ? AND l.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL`,
+    [workerId]
+  );
+  const row = rows[0];
+  if (!row || !attendanceTokenMatches(
+    token,
+    createAttendanceToken(row.tenant_id, row.worker_id, row.token_salt),
+    row.token_hash
+  )) {
+    return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+  }
+  const [locationRows] = await pool.execute(
+    `SELECT id, name, latitude, longitude, radius_meters, allowed_activities
+       FROM tenant_attendance_locations
+      WHERE tenant_id = ? ORDER BY name, id`,
+    [row.tenant_id]
+  );
+  const locations = locationRows.map((location) => ({
+    ...location,
+    id: String(location.id),
+    latitude: Number(location.latitude),
+    longitude: Number(location.longitude),
+    radius_meters: Number(location.radius_meters),
+    allowed_activities: JSON.parse(location.allowed_activities),
+  }));
+  const [historyRows] = await pool.execute(
+    `SELECT DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date,
+            check_in_time, check_out_time, status, attendance_type, approval_status,
+            check_in_latitude, check_in_longitude,
+            check_out_latitude, check_out_longitude
+       FROM attendance
+      WHERE tenant_id = ? AND worker_id = ? AND deleted_at IS NULL
+      ORDER BY attendance_date DESC
+      LIMIT 30`,
+    [row.tenant_id, row.worker_id]
+  );
+  const { tenant_id, token_salt, token_hash, ...attendanceData } = row;
+  res.json({
+    data: {
+      ...attendanceData,
+      worker_id: String(attendanceData.worker_id),
+      location_id: attendanceData.location_id == null ? null : String(attendanceData.location_id),
+      has_evidence: Boolean(attendanceData.has_evidence),
+      locations,
+      recent_attendance: historyRows,
+    },
+  });
+}));
+
+app.post('/api/public/attendance', attendanceEvidenceUpload.single('evidence'), asyncRoute(async (req, res) => {
+  const {
+    worker_id: workerId,
+    token,
+    action,
+    latitude,
+    longitude,
+    request_type: requestType,
+  } = req.body || {};
+  const parsedLatitude = typeof latitude === 'number' ? latitude : latitude == null || String(latitude).trim() === '' ? NaN : Number(latitude);
+  const parsedLongitude = typeof longitude === 'number' ? longitude : longitude == null || String(longitude).trim() === '' ? NaN : Number(longitude);
+  if (!validWorkerId(workerId) || !validAttendanceToken(token)
+    || !['check_in', 'check_out', 'request_status'].includes(action)
+    || !validCoordinates(parsedLatitude, parsedLongitude)) {
+    return res.status(400).json({ error: 'Provide a valid attendance link, action, latitude, and longitude' });
+  }
+  if (action === 'request_status' && !EMPLOYEE_REQUEST_TYPES.has(requestType)) {
+    return res.status(400).json({ error: 'Choose a valid attendance request type' });
+  }
+  if (action !== 'request_status' && requestType != null && requestType !== 'dinas') {
+    return res.status(400).json({ error: 'Only Dinas can be selected as an attendance type for check-in or check-out' });
+  }
+  const isDinas = action !== 'request_status' && requestType === 'dinas';
+  if (action === 'request_status' && req.file) {
+    return res.status(400).json({ error: 'Evidence images are only accepted for Dinas attendance' });
+  }
+  if (isDinas && action === 'check_in') {
+    const evidenceType = req.file && profilePhotoMimeType(req.file.buffer);
+    if (!evidenceType || req.file.mimetype !== evidenceType) {
+      return res.status(400).json({ error: 'A valid JPG or PNG evidence image is required for Dinas' });
+    }
+  } else if (isDinas && req.file) {
+    return res.status(400).json({ error: 'Dinas evidence is only uploaded with Check-In' });
+  } else if (req.file) {
+    return res.status(400).json({ error: 'Evidence images are only accepted for Dinas attendance' });
+  }
+  const usesGeofence = !isDinas;
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [workers] = await connection.execute(
+      `SELECT w.id AS worker_id, w.tenant_id, s.token_salt, l.token_hash
+         FROM workers w
+         JOIN tenant_attendance_settings s ON s.tenant_id = w.tenant_id
+         JOIN worker_attendance_links l ON w.id = l.worker_id AND w.tenant_id = l.tenant_id
+        WHERE w.id = ? AND l.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL
+        FOR UPDATE`,
+      [workerId]
+    );
+    const worker = workers[0];
+    if (!worker || !attendanceTokenMatches(
+      token,
+      createAttendanceToken(worker.tenant_id, worker.worker_id, worker.token_salt),
+      worker.token_hash
+    )) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+    }
+
+    const [records] = await connection.execute(
+      `SELECT id, check_in_time, check_out_time, status, attendance_type, approval_status
+         FROM attendance
+        WHERE tenant_id = ? AND worker_id = ? AND attendance_date = CURDATE() AND deleted_at IS NULL
+        FOR UPDATE`,
+      [worker.tenant_id, worker.worker_id]
+    );
+    const record = records[0];
+    let location = null;
+    const activity = action === 'request_status' ? requestType : action;
+    if (usesGeofence) {
+      const [locationRows] = await connection.execute(
+        `SELECT id, name, latitude, longitude, radius_meters, allowed_activities
+           FROM tenant_attendance_locations
+          WHERE tenant_id = ? FOR UPDATE`,
+        [worker.tenant_id]
+      );
+      const match = matchRequiredAttendanceLocation(
+        parsedLatitude,
+        parsedLongitude,
+        locationRows,
+        activity
+      );
+      if (match.isRequired && !match.location) {
+        await connection.rollback();
+        return res.status(403).json({ error: 'You must be inside an attendance area that requires this activity' });
+      }
+      location = match.location;
+    }
+
+    if (action === 'request_status') {
+      if (record && record.approval_status !== 'rejected') {
+        await connection.rollback();
+        return res.status(409).json({ error: 'An attendance record already exists for today' });
+      }
+      const status = requestType === 'leave' ? 'leave' : requestType;
+      if (record) {
+        await connection.execute(
+          `UPDATE attendance
+              SET status = ?, attendance_type = ?, approval_status = 'pending', approval_note = NULL,
+                  approved_by = NULL, approval_updated_at = NULL, location_id = ?,
+                  check_in_time = NULL, check_out_time = NULL,
+                  check_in_latitude = NULL, check_in_longitude = NULL,
+                  check_out_latitude = NULL, check_out_longitude = NULL,
+                  evidence_data = NULL, evidence_mime_type = NULL
+            WHERE id = ?`,
+          [status, requestType, location?.id ?? null, record.id]
+        );
+      } else {
+        await connection.execute(
+          `INSERT INTO attendance
+             (tenant_id, worker_id, attendance_date, status, attendance_type, approval_status, location_id)
+           VALUES (?, ?, CURDATE(), ?, ?, 'pending', ?)`,
+          [worker.tenant_id, worker.worker_id, status, requestType, location?.id ?? null]
+        );
+      }
+    } else if (isDinas) {
+      if (action === 'check_in') {
+        if (record && !(record.attendance_type === 'dinas' && record.approval_status === 'rejected')) {
+          await connection.rollback();
+          return res.status(409).json({ error: 'An attendance record already exists for today' });
+        }
+        if (record) {
+          await connection.execute(
+            `UPDATE attendance
+                SET status = 'dinas', attendance_type = 'dinas', approval_status = 'pending',
+                    approval_note = NULL, approved_by = NULL, approval_updated_at = NULL,
+                    location_id = NULL, check_in_time = CURRENT_TIMESTAMP, check_out_time = NULL,
+                    check_in_latitude = ?, check_in_longitude = ?,
+                    check_out_latitude = NULL, check_out_longitude = NULL,
+                    evidence_data = ?, evidence_mime_type = ?
+              WHERE id = ?`,
+            [parsedLatitude, parsedLongitude, req.file.buffer, profilePhotoMimeType(req.file.buffer), record.id]
+          );
+        } else {
+          await connection.execute(
+            `INSERT INTO attendance (
+               tenant_id, worker_id, attendance_date, check_in_time, check_in_latitude, check_in_longitude,
+               status, attendance_type, approval_status, evidence_data, evidence_mime_type
+             ) VALUES (?, ?, CURDATE(), CURRENT_TIMESTAMP, ?, ?, 'dinas', 'dinas', 'pending', ?, ?)`,
+            [worker.tenant_id, worker.worker_id, parsedLatitude, parsedLongitude, req.file.buffer, profilePhotoMimeType(req.file.buffer)]
+          );
+        }
+      } else {
+        if (!record || record.attendance_type !== 'dinas' || !record.check_in_time
+          || record.check_out_time || record.approval_status === 'rejected') {
+          await connection.rollback();
+          return res.status(409).json({ error: 'A valid Dinas check-in is required before check-out' });
+        }
+        await connection.execute(
+          `UPDATE attendance
+              SET check_out_time = CURRENT_TIMESTAMP, check_out_latitude = ?, check_out_longitude = ?
+            WHERE id = ?`,
+          [parsedLatitude, parsedLongitude, record.id]
+        );
+      }
+    } else if (action === 'check_in') {
+      if (record?.check_in_time) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Check-in has already been recorded for today' });
+      }
+      if (record && record.approval_status === 'pending') {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Your attendance request is waiting for HR approval' });
+      }
+      if (record && !['present', 'absent'].includes(record.status)
+        && record.approval_status !== 'rejected') {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Attendance status was already recorded by HR' });
+      }
+      if (record) {
+        await connection.execute(
+          `UPDATE attendance
+              SET check_in_time = CURRENT_TIMESTAMP, status = 'present', attendance_type = 'regular',
+                  approval_status = 'not_required', approval_note = NULL, approved_by = NULL,
+                  approval_updated_at = NULL, location_id = ?,
+                  check_in_latitude = ?, check_in_longitude = ?,
+                  evidence_data = NULL, evidence_mime_type = NULL
+            WHERE id = ?`,
+          [location?.id ?? null, parsedLatitude, parsedLongitude, record.id]
+        );
+      } else {
+        await connection.execute(
+          `INSERT INTO attendance (
+             tenant_id, worker_id, attendance_date, check_in_time, check_in_latitude, check_in_longitude,
+             status, attendance_type, location_id
+           ) VALUES (?, ?, CURDATE(), CURRENT_TIMESTAMP, ?, ?, 'present', 'regular', ?)`,
+          [worker.tenant_id, worker.worker_id, parsedLatitude, parsedLongitude, location?.id ?? null]
+        );
+      }
+    } else {
+      if (!record?.check_in_time || record.check_out_time || record.attendance_type !== 'regular') {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Check-in is required and check-out must not already exist' });
+      }
+      await connection.execute(
+        `UPDATE attendance
+            SET check_out_time = CURRENT_TIMESTAMP, check_out_latitude = ?, check_out_longitude = ?,
+                location_id = ?
+          WHERE id = ?`,
+        [parsedLatitude, parsedLongitude, location?.id ?? null, record.id]
+      );
+    }
+
+    const [updatedRows] = await connection.execute(
+      `SELECT DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date,
+              check_in_time, check_out_time, status, attendance_type, approval_status, approval_note,
+              location_id, IF(evidence_data IS NULL, 0, 1) AS has_evidence,
+              check_in_latitude, check_in_longitude,
+              check_out_latitude, check_out_longitude
+         FROM attendance WHERE tenant_id = ? AND worker_id = ? AND attendance_date = CURDATE() AND deleted_at IS NULL`,
+      [worker.tenant_id, worker.worker_id]
+    );
+    await connection.commit();
+    res.json({
+      data: {
+        ...updatedRows[0],
+        location_id: updatedRows[0].location_id == null ? null : String(updatedRows[0].location_id),
+        has_evidence: Boolean(updatedRows[0].has_evidence),
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+app.post('/api/auth/register', asyncRoute(async (req, res) => {
+  const { company_name, full_name, email, password } = req.body || {};
+  if (typeof company_name !== 'string' || company_name.trim().length < 2 || company_name.trim().length > 150
+    || (full_name != null && (typeof full_name !== 'string' || !full_name.trim() || full_name.trim().length > 150))
+    || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+    || !validPassword(password)) {
+    return res.status(400).json({
+      error: 'Provide a company name, valid full name and email, and a password of 12 to 72 UTF-8 bytes',
+    });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedFullName = normalizeText(full_name || company_name);
+  const slug = `${company_name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 130)}-${crypto.randomBytes(3).toString('hex')}`;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [tenantResult] = await connection.execute(
+      'INSERT INTO tenants (name, slug) VALUES (?, ?)',
+      [normalizeText(company_name), slug]
+    );
+    const passwordHash = await bcrypt.hash(password, 12);
+    const [userResult] = await connection.execute(
+      `INSERT INTO users (tenant_id, full_name, email, email_hash, password_hash, role)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [tenantResult.insertId, normalizedFullName, normalizedEmail, hashEmail(normalizedEmail), passwordHash, 'admin']
+    );
+    await connection.commit();
+    const user = {
+      id: userResult.insertId,
+      tenant_id: tenantResult.insertId,
+      full_name: normalizedFullName,
+      email: normalizedEmail,
+      role: 'admin',
+      token_version: 0,
+    };
+    createSessionCookie(res, user);
+    res.status(201).json({
+      data: {
+        id: String(user.id),
+        full_name: user.full_name,
+        email: user.email,
+        role: user.role,
+        profile_photo_url: null,
+        company_name: normalizeText(company_name),
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'An account with this email is already registered' });
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+app.post('/api/auth/login', asyncRoute(async (req, res) => {
+  const { email, password } = req.body || {};
+  if (typeof email !== 'string' || typeof password !== 'string' || Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ error: 'Provide a valid email and a password no longer than 72 UTF-8 bytes' });
+  }
+  const [users] = await pool.execute(
+    `SELECT u.id, u.tenant_id, u.full_name, u.email, u.password_hash, u.role,
+            u.profile_photo_url, u.profile_photo_updated_at, u.is_active, u.token_version,
+            t.name AS company_name
+       FROM users u JOIN tenants t ON t.id = u.tenant_id
+      WHERE u.email_hash = ? AND u.email = ?`,
+    [hashEmail(email), email.trim().toLowerCase()]
+  );
+  let user = null;
+  for (const candidate of users) {
+    if (candidate.is_active && await bcrypt.compare(password, candidate.password_hash)) {
+      user = candidate;
+      break;
+    }
+  }
+  if (!user) return res.status(401).json({ error: 'Email or password is incorrect' });
+  createSessionCookie(res, user);
+  res.json({
+    data: {
+      id: String(user.id),
+      full_name: user.full_name,
+      email: user.email,
+      role: user.role,
+      profile_photo_url: profilePhotoUrl(user),
+      company_name: user.company_name,
+    },
+  });
+}));
+
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie(COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
+  res.status(204).end();
+});
+
+app.get('/api/auth/me', requireAuth, asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT u.email, u.role, t.name AS company_name FROM users u
+       JOIN tenants t ON t.id = u.tenant_id WHERE u.id = ? AND u.tenant_id = ?`,
+    [req.auth.userId, req.auth.tenantId]
+  );
+  if (!rows[0]) return res.status(401).json({ error: 'Account no longer exists' });
+  res.json({
+    data: {
+      id: req.auth.userId,
+      full_name: req.auth.fullName,
+      email: rows[0].email,
+      role: req.auth.role,
+      profile_photo_url: req.auth.profilePhotoUrl,
+      company_name: rows[0].company_name,
+    },
+  });
+}));
+
+app.use('/api', requireAuth);
+
+app.get('/api/admin/attendance-settings', requireAdmin, asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT updated_at FROM tenant_attendance_settings WHERE tenant_id = ?`,
+    [req.auth.tenantId]
+  );
+  res.json({
+    data: {
+      salt_configured: Boolean(rows[0]),
+      updated_at: rows[0]?.updated_at || null,
+    },
+  });
+}));
+
+app.get('/api/admin/attendance-locations', requireAdmin, asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT id, name, latitude, longitude, radius_meters, allowed_activities, created_at
+       FROM tenant_attendance_locations
+      WHERE tenant_id = ? ORDER BY name, id`,
+    [req.auth.tenantId]
+  );
+  res.json({
+    data: rows.map((location) => ({
+      ...location,
+      id: String(location.id),
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+      radius_meters: Number(location.radius_meters),
+      allowed_activities: JSON.parse(location.allowed_activities),
+    })),
+  });
+}));
+
+app.post('/api/admin/attendance-locations', requireAdmin, asyncRoute(async (req, res) => {
+  const input = req.body || {};
+  if (!validAttendanceLocationInput(input)) {
+    return res.status(400).json({
+      error: 'Provide a location name, valid coordinates, radius from 25 to 5000 meters, and allowed activities',
+    });
+  }
+  const name = normalizeText(input.name);
+  const allowedActivities = parseAllowedActivities(input.allowed_activities);
+  const [result] = await pool.execute(
+    `INSERT INTO tenant_attendance_locations
+       (tenant_id, name, latitude, longitude, radius_meters, allowed_activities)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      req.auth.tenantId,
+      name,
+      input.latitude,
+      input.longitude,
+      input.radius_meters,
+      JSON.stringify(allowedActivities),
+    ]
+  );
+  res.status(201).json({
+    data: {
+      id: String(result.insertId),
+      name,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      radius_meters: input.radius_meters,
+      allowed_activities: allowedActivities,
+    },
+  });
+}));
+
+app.delete('/api/admin/attendance-locations/:id', requireAdmin, asyncRoute(async (req, res) => {
+  if (!validWorkerId(req.params.id)) return res.status(400).json({ error: 'Provide a valid location ID' });
+  const [result] = await pool.execute(
+    `DELETE FROM tenant_attendance_locations WHERE id = ? AND tenant_id = ?`,
+    [req.params.id, req.auth.tenantId]
+  );
+  if (!result.affectedRows) return res.status(404).json({ error: 'Attendance location not found' });
+  res.status(204).end();
+}));
+
+app.post('/api/admin/attendance-settings/salt', requireAdmin, asyncRoute(async (req, res) => {
+  const { confirm_rotation } = req.body || {};
+  if (confirm_rotation !== true) {
+    return res.status(400).json({ error: 'Confirm salt generation or rotation explicitly' });
+  }
+  const salt = crypto.randomBytes(32);
+  const connection = await pool.getConnection();
+  let updatedAt;
+  try {
+    await connection.beginTransaction();
+    await connection.execute(
+      `INSERT INTO tenant_attendance_settings (tenant_id, token_salt)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE token_salt = VALUES(token_salt), updated_at = CURRENT_TIMESTAMP`,
+      [req.auth.tenantId, salt]
+    );
+    await connection.execute(
+      `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = ? AND revoked_at IS NULL`,
+      [req.auth.tenantId]
+    );
+    const [rows] = await connection.execute(
+      'SELECT updated_at FROM tenant_attendance_settings WHERE tenant_id = ?',
+      [req.auth.tenantId]
+    );
+    updatedAt = rows[0].updated_at;
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  res.json({
+    data: {
+      salt_configured: true,
+      updated_at: updatedAt,
+    },
+  });
+}));
+
+app.get('/api/document-types', asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT id, code, name, is_active, is_builtin, warning_threshold_days, created_at
+       FROM document_types WHERE tenant_id = ? ORDER BY created_at, id`,
+    [req.auth.tenantId]
+  );
+  res.json({
+    data: rows.map((type) => ({
+      ...type,
+      id: String(type.id),
+      is_active: Boolean(type.is_active),
+      is_builtin: Boolean(type.is_builtin),
+      warning_threshold_days: type.warning_threshold_days == null ? null : Number(type.warning_threshold_days),
+    })),
+  });
+}));
+
+app.post('/api/admin/document-types', requireAdmin, asyncRoute(async (req, res) => {
+  const { name } = req.body || {};
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 100) {
+    return res.status(400).json({ error: 'Document type name must be 1 to 100 characters' });
+  }
+  const normalizedName = normalizeDocumentTypeName(name);
+  const [existingTypes] = await pool.execute(
+    'SELECT code FROM document_types WHERE tenant_id = ?',
+    [req.auth.tenantId]
+  );
+  const code = documentTypeCode(normalizedName, existingTypes.map(({ code: existingCode }) => existingCode));
+  const [result] = await pool.execute(
+    `INSERT INTO document_types (tenant_id, code, name, name_hash)
+     VALUES (?, ?, ?, ?)`,
+    [req.auth.tenantId, code, normalizedName, hashNormalizedText(normalizedName)]
+  );
+  res.status(201).json({
+    data: {
+      id: String(result.insertId),
+      code,
+      name: normalizedName,
+      is_active: true,
+      is_builtin: false,
+      warning_threshold_days: null,
+    },
+  });
+}));
+
+app.patch('/api/admin/document-types/:code', requireAdmin, asyncRoute(async (req, res) => {
+  const { name, is_active, warning_threshold_days: warningThresholdDays } = req.body || {};
+  const updatesName = Object.hasOwn(req.body || {}, 'name');
+  const updatesStatus = Object.hasOwn(req.body || {}, 'is_active');
+  const updatesWarningThreshold = Object.hasOwn(req.body || {}, 'warning_threshold_days');
+  if ((!updatesName && !updatesStatus && !updatesWarningThreshold)
+    || (updatesName && (typeof name !== 'string' || !name.trim() || name.trim().length > 100))
+    || (updatesStatus && typeof is_active !== 'boolean')
+    || (updatesWarningThreshold && warningThresholdDays !== null && !validDocumentWarningThreshold(warningThresholdDays))) {
+    return res.status(400).json({ error: 'Provide a valid document type name, active status, or warning threshold from 1 to 365 days (or null to use company default)' });
+  }
+  const normalizedName = updatesName ? normalizeDocumentTypeName(name) : null;
+  const assignments = [];
+  const values = [];
+  if (updatesName) {
+    assignments.push('name = ?', 'name_hash = ?');
+    values.push(normalizedName, hashNormalizedText(normalizedName));
+  }
+  if (updatesStatus) {
+    assignments.push('is_active = ?');
+    values.push(is_active ? 1 : 0);
+  }
+  if (updatesWarningThreshold) {
+    assignments.push('warning_threshold_days = ?');
+    values.push(warningThresholdDays);
+  }
+  values.push(req.auth.tenantId, req.params.code);
+  await pool.execute(
+    `UPDATE document_types SET ${assignments.join(', ')} WHERE tenant_id = ? AND code = ?`,
+    values
+  );
+  const [rows] = await pool.execute(
+    `SELECT id, code, name, is_active, is_builtin, warning_threshold_days, created_at
+       FROM document_types WHERE tenant_id = ? AND code = ?`,
+    [req.auth.tenantId, req.params.code]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Document type not found' });
+  res.json({
+    data: {
+      ...rows[0],
+      id: String(rows[0].id),
+      is_active: Boolean(rows[0].is_active),
+      is_builtin: Boolean(rows[0].is_builtin),
+      warning_threshold_days: rows[0].warning_threshold_days == null ? null : Number(rows[0].warning_threshold_days),
+    },
+  });
+}));
+
+app.patch('/api/profile', asyncRoute(async (req, res) => {
+  const { full_name } = req.body || {};
+  if (typeof full_name !== 'string' || !full_name.trim() || full_name.trim().length > 150) {
+    return res.status(400).json({ error: 'Provide a valid full name' });
+  }
+  const normalizedName = normalizeText(full_name);
+  await pool.execute(
+    `UPDATE users SET full_name = ?
+      WHERE id = ? AND tenant_id = ? AND is_active = 1`,
+    [normalizedName, req.auth.userId, req.auth.tenantId]
+  );
+  res.json({
+    data: {
+      id: req.auth.userId,
+      full_name: normalizedName,
+      email: req.auth.email,
+      role: req.auth.role,
+      profile_photo_url: req.auth.profilePhotoUrl,
+    },
+  });
+}));
+
+app.get('/api/profile/photo', asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT profile_photo_data, profile_photo_mime_type
+       FROM users WHERE id = ? AND tenant_id = ? AND is_active = 1`,
+    [req.auth.userId, req.auth.tenantId]
+  );
+  const photo = rows[0];
+  if (!photo?.profile_photo_data || !['image/jpeg', 'image/png'].includes(photo.profile_photo_mime_type)) {
+    return res.status(404).json({ error: 'Profile photo not found' });
+  }
+  res.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Type': photo.profile_photo_mime_type,
+  });
+  res.send(photo.profile_photo_data);
+}));
+
+app.post('/api/profile/photo', profilePhotoUpload.single('photo'), asyncRoute(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Choose a JPG or PNG profile photo' });
+  const mimeType = profilePhotoMimeType(req.file.buffer);
+  if (!mimeType || req.file.mimetype !== mimeType) {
+    return res.status(400).json({ error: 'Profile photo must be a valid JPG or PNG image' });
+  }
+  await pool.execute(
+    `UPDATE users
+        SET profile_photo_data = ?, profile_photo_mime_type = ?, profile_photo_updated_at = CURRENT_TIMESTAMP,
+            profile_photo_url = NULL
+      WHERE id = ? AND tenant_id = ? AND is_active = 1`,
+    [req.file.buffer, mimeType, req.auth.userId, req.auth.tenantId]
+  );
+  res.json({
+    data: {
+      id: req.auth.userId,
+      full_name: req.auth.fullName,
+      email: req.auth.email,
+      role: req.auth.role,
+      profile_photo_url: `/api/profile/photo?v=${Date.now()}`,
+    },
+  });
+}));
+
+app.patch('/api/profile/password', asyncRoute(async (req, res) => {
+  const { current_password, new_password, confirm_password } = req.body || {};
+  if (typeof current_password !== 'string' || !validPassword(new_password)
+    || new_password !== confirm_password || current_password === new_password) {
+    return res.status(400).json({
+      error: 'Provide the current password, matching new password confirmation, and a different password of 12 to 72 UTF-8 bytes',
+    });
+  }
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      `SELECT password_hash, token_version FROM users
+        WHERE id = ? AND tenant_id = ? AND is_active = 1 FOR UPDATE`,
+      [req.auth.userId, req.auth.tenantId]
+    );
+    if (!rows[0] || !(await bcrypt.compare(current_password, rows[0].password_hash))) {
+      await connection.rollback();
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    const passwordHash = await bcrypt.hash(new_password, 12);
+    const tokenVersion = Number(rows[0].token_version) + 1;
+    await connection.execute(
+      `UPDATE users SET password_hash = ?, token_version = ?
+        WHERE id = ? AND tenant_id = ?`,
+      [passwordHash, tokenVersion, req.auth.userId, req.auth.tenantId]
+    );
+    await connection.commit();
+    createSessionCookie(res, {
+      id: req.auth.userId,
+      tenant_id: req.auth.tenantId,
+      token_version: tokenVersion,
+    });
+    res.json({ data: { message: 'Password updated. Other sessions have been signed out.' } });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+app.get('/api/admin/users', requireAdmin, asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT id, full_name, email, role, profile_photo_url, is_active, created_at
+       FROM users WHERE tenant_id = ? ORDER BY created_at ASC, id ASC`,
+    [req.auth.tenantId]
+  );
+  res.json({ data: rows.map((user) => ({ ...user, is_active: Boolean(user.is_active) })) });
+}));
+
+app.post('/api/admin/users', requireAdmin, asyncRoute(async (req, res) => {
+  const { full_name, email, password, role } = req.body || {};
+  if (typeof full_name !== 'string' || !full_name.trim() || full_name.trim().length > 150
+    || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+    || !validPassword(password)
+    || !['admin', 'hr_manager', 'viewer'].includes(role)) {
+    return res.status(400).json({ error: 'Provide a valid name, email, initial password, and role' });
+  }
+  const normalizedEmail = email.trim().toLowerCase();
+  const passwordHash = await bcrypt.hash(password, 12);
+  const [result] = await pool.execute(
+    `INSERT INTO users (tenant_id, full_name, email, email_hash, password_hash, role)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      req.auth.tenantId,
+      normalizeText(full_name),
+      normalizedEmail,
+      hashEmail(normalizedEmail),
+      passwordHash,
+      role,
+    ]
+  );
+  res.status(201).json({
+    data: {
+      id: String(result.insertId),
+      full_name: normalizeText(full_name),
+      email: normalizedEmail,
+      role,
+      profile_photo_url: null,
+      is_active: true,
+    },
+  });
+}));
+
+app.patch('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
+  const { role, is_active } = req.body || {};
+  const updatesRole = Object.hasOwn(req.body || {}, 'role');
+  const updatesStatus = Object.hasOwn(req.body || {}, 'is_active');
+  if ((!updatesRole && !updatesStatus)
+    || (updatesRole && !['admin', 'hr_manager', 'viewer'].includes(role))
+    || (updatesStatus && typeof is_active !== 'boolean')) {
+    return res.status(400).json({ error: 'Provide a valid role and/or active status' });
+  }
+  if (String(req.params.id) === req.auth.userId
+    && ((updatesRole && role !== 'admin') || (updatesStatus && !is_active))) {
+    return res.status(400).json({ error: 'You cannot remove your own administrator access or deactivate your account' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [targets] = await connection.execute(
+      `SELECT id, role, is_active FROM users
+        WHERE id = ? AND tenant_id = ? FOR UPDATE`,
+      [req.params.id, req.auth.tenantId]
+    );
+    const target = targets[0];
+    if (!target) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const removesActiveAdmin = target.role === 'admin' && target.is_active
+      && ((updatesRole && role !== 'admin') || (updatesStatus && !is_active));
+    if (removesActiveAdmin) {
+      const [admins] = await connection.execute(
+        `SELECT id FROM users
+          WHERE tenant_id = ? AND role = 'admin' AND is_active = 1 FOR UPDATE`,
+        [req.auth.tenantId]
+      );
+      if (admins.length <= 1) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'The last active administrator cannot be demoted or deactivated' });
+      }
+    }
+    const nextRole = updatesRole ? role : target.role;
+    const nextActive = updatesStatus ? is_active : Boolean(target.is_active);
+    await connection.execute(
+      `UPDATE users SET role = ?, is_active = ?, token_version = token_version + 1
+        WHERE id = ? AND tenant_id = ?`,
+      [nextRole, nextActive ? 1 : 0, req.params.id, req.auth.tenantId]
+    );
+    await connection.commit();
+    res.json({
+      data: {
+        id: String(target.id),
+        role: nextRole,
+        is_active: nextActive,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+app.post('/api/admin/users/:id/reset-password', requireAdmin, asyncRoute(async (req, res) => {
+  if (String(req.params.id) === req.auth.userId) {
+    return res.status(400).json({ error: 'Use the profile security form to change your own password' });
+  }
+  const { new_password } = req.body || {};
+  if (!validPassword(new_password)) {
+    return res.status(400).json({ error: 'New password must be 12 to 72 UTF-8 bytes' });
+  }
+  const passwordHash = await bcrypt.hash(new_password, 12);
+  const [result] = await pool.execute(
+    `UPDATE users SET password_hash = ?, token_version = token_version + 1
+      WHERE id = ? AND tenant_id = ?`,
+    [passwordHash, req.params.id, req.auth.tenantId]
+  );
+  if (!result.affectedRows) return res.status(404).json({ error: 'User not found' });
+  res.json({ data: { message: 'Password reset. The user must sign in again.' } });
+}));
+
+app.get('/api/dashboard', asyncRoute(async (req, res) => {
+  const [counts] = await pool.execute(
+    `SELECT status, COUNT(*) AS total FROM workers WHERE tenant_id = ? AND deleted_at IS NULL GROUP BY status`,
+    [req.auth.tenantId]
+  );
+  const summary = { offered: 0, preactive: 0, active: 0, inactive: 0, expiring_documents: 0, pending_attendance_claims: 0 };
+  for (const row of counts) summary[row.status] = Number(row.total);
+  const [settingsRows] = await pool.execute(
+    `SELECT warning_threshold_days FROM tenant_document_settings WHERE tenant_id = ?`,
+    [req.auth.tenantId]
+  );
+  const warningThresholdDays = Number(settingsRows[0]?.warning_threshold_days ?? 30);
+  const [dateRows] = await pool.execute(
+    `SELECT DATE_FORMAT(UTC_DATE(), '%Y-%m-%d') AS warning_start_date,
+            DATE_FORMAT(DATE_ADD(UTC_DATE(), INTERVAL ? DAY), '%Y-%m-%d') AS warning_cutoff_date`,
+    [warningThresholdDays]
+  );
+  const [expiring] = await pool.execute(
+    `SELECT COUNT(*) AS total
+       FROM documents d
+       JOIN workers w ON w.tenant_id = d.tenant_id AND w.id = d.worker_id AND w.deleted_at IS NULL
+       LEFT JOIN document_types dt
+         ON dt.tenant_id = d.tenant_id AND dt.code = d.type
+      WHERE d.tenant_id = ? AND d.deleted_at IS NULL
+        AND ((d.status = 'valid'
+          AND d.valid_until <= DATE_ADD(UTC_DATE(), INTERVAL COALESCE(dt.warning_threshold_days, ?) DAY))
+          OR d.status = 'expired')`,
+    [req.auth.tenantId, warningThresholdDays]
+  );
+  summary.expiring_documents = Number(expiring[0].total);
+  const [pendingAttendance] = await pool.execute(
+    `SELECT COUNT(*) AS total FROM attendance a
+       JOIN workers w ON w.tenant_id = a.tenant_id AND w.id = a.worker_id AND w.deleted_at IS NULL
+      WHERE a.tenant_id = ? AND a.approval_status = 'pending' AND a.deleted_at IS NULL`,
+    [req.auth.tenantId]
+  );
+  summary.pending_attendance_claims = Number(pendingAttendance[0].total);
+  summary.document_warning_threshold_days = warningThresholdDays;
+  summary.document_warning_start_date = dateRows[0].warning_start_date;
+  summary.document_warning_cutoff_date = dateRows[0].warning_cutoff_date;
+  res.json({ data: summary });
+}));
+
+app.get('/api/admin/document-settings', requireAdmin, asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT warning_threshold_days, updated_at
+       FROM tenant_document_settings
+      WHERE tenant_id = ?`,
+    [req.auth.tenantId]
+  );
+  res.json({
+    data: rows[0]
+      ? { warning_threshold_days: Number(rows[0].warning_threshold_days), updated_at: rows[0].updated_at }
+      : { warning_threshold_days: 30, updated_at: null },
+  });
+}));
+
+app.patch('/api/admin/document-settings', requireAdmin, asyncRoute(async (req, res) => {
+  const { warning_threshold_days: warningThresholdDays } = req.body || {};
+  if (!validDocumentWarningThreshold(warningThresholdDays)) {
+    return res.status(400).json({ error: 'Warning threshold must be a whole number between 1 and 365 days' });
+  }
+  await pool.execute(
+    `INSERT INTO tenant_document_settings (tenant_id, warning_threshold_days)
+     VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE warning_threshold_days = VALUES(warning_threshold_days)`,
+    [req.auth.tenantId, warningThresholdDays]
+  );
+  const [rows] = await pool.execute(
+    `SELECT warning_threshold_days, updated_at
+       FROM tenant_document_settings
+      WHERE tenant_id = ?`,
+    [req.auth.tenantId]
+  );
+  res.json({ data: { warning_threshold_days: Number(rows[0].warning_threshold_days), updated_at: rows[0].updated_at } });
+}));
+
+app.get('/api/attendance', asyncRoute(async (req, res) => {
+  const requestedDate = req.query.date || null;
+  if (requestedDate && !validDate(requestedDate)) {
+    return res.status(400).json({ error: 'Attendance date must use YYYY-MM-DD format' });
+  }
+  const [dateRows] = await pool.execute(
+    `SELECT DATE_FORMAT(COALESCE(?, CURDATE()), '%Y-%m-%d') AS attendance_date,
+            EXISTS(SELECT 1 FROM tenant_attendance_settings WHERE tenant_id = ?) AS salt_configured`,
+    [requestedDate, req.auth.tenantId]
+  );
+  const attendanceDate = dateRows[0].attendance_date;
+  const [rows] = await pool.execute(
+    `SELECT w.id AS worker_id, w.full_name, w.position,
+            a.id AS attendance_id, a.status, a.attendance_type, a.approval_status, a.approval_note,
+            a.check_in_time, a.check_out_time, a.location_id, a.approved_by, a.approval_updated_at,
+            a.check_in_latitude, a.check_in_longitude,
+            a.check_out_latitude, a.check_out_longitude,
+            IF(a.evidence_data IS NULL, 0, 1) AS has_evidence,
+            IF(l.worker_id IS NULL, 0, 1) AS has_attendance_link
+       FROM workers w
+       LEFT JOIN attendance a ON a.tenant_id = w.tenant_id AND a.worker_id = w.id
+         AND a.attendance_date = ? AND a.deleted_at IS NULL
+       LEFT JOIN worker_attendance_links l ON l.tenant_id = w.tenant_id AND l.worker_id = w.id
+         AND l.revoked_at IS NULL
+      WHERE w.tenant_id = ? AND w.status = 'active' AND w.deleted_at IS NULL
+      ORDER BY w.full_name, w.id`,
+    [attendanceDate, req.auth.tenantId]
+  );
+  res.json({
+    data: {
+      attendance_date: attendanceDate,
+      salt_configured: Boolean(dateRows[0].salt_configured),
+      records: rows.map((row) => ({
+        ...row,
+        worker_id: String(row.worker_id),
+        location_id: row.location_id == null ? null : String(row.location_id),
+        has_evidence: Boolean(row.has_evidence),
+        has_attendance_link: Boolean(row.has_attendance_link),
+      })),
+    },
+  });
+}));
+
+app.get('/api/attendance/month', asyncRoute(async (req, res) => {
+  const range = attendanceMonthRange(req.query.month);
+  if (!range) return res.status(400).json({ error: 'Attendance month must use YYYY-MM format' });
+  const [rows] = await pool.execute(
+    `SELECT w.id AS worker_id, w.full_name, w.position,
+            a.id AS attendance_id,
+            DATE_FORMAT(a.attendance_date, '%Y-%m-%d') AS attendance_date,
+            a.status, a.attendance_type, a.approval_status, a.approval_note,
+            a.check_in_time, a.check_out_time,
+            a.check_in_latitude, a.check_in_longitude,
+            a.check_out_latitude, a.check_out_longitude,
+            IF(a.evidence_data IS NULL, 0, 1) AS has_evidence
+       FROM workers w
+       LEFT JOIN attendance a ON a.tenant_id = w.tenant_id AND a.worker_id = w.id
+         AND a.attendance_date >= ? AND a.attendance_date < ? AND a.deleted_at IS NULL
+      WHERE w.tenant_id = ? AND w.status = 'active' AND w.deleted_at IS NULL
+      ORDER BY w.full_name, w.id, a.attendance_date`,
+    [range.start, range.end, req.auth.tenantId]
+  );
+  res.json({
+    data: {
+      month: range.month,
+      days_in_month: range.days,
+      records: rows.map((row) => ({
+        ...row,
+        worker_id: String(row.worker_id),
+        attendance_id: row.attendance_id == null ? null : String(row.attendance_id),
+        has_evidence: Boolean(row.has_evidence),
+      })),
+    },
+  });
+}));
+
+app.patch('/api/attendance/:workerId/status', requireAdmin, asyncRoute(async (req, res) => {
+  const { attendance_date, status } = req.body || {};
+  if (!validDate(attendance_date) || !attendance_date
+    || !['permission', 'sick', 'absent', 'off', 'leave'].includes(status)) {
+    return res.status(400).json({ error: 'Provide a valid date and status (off, permission, leave, sick, or absent)' });
+  }
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [workers] = await connection.execute(
+      `SELECT id FROM workers WHERE id = ? AND tenant_id = ? AND status = 'active' AND deleted_at IS NULL FOR UPDATE`,
+      [req.params.workerId, req.auth.tenantId]
+    );
+    if (!workers[0]) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Active worker not found' });
+    }
+    const [records] = await connection.execute(
+      `SELECT id, check_in_time FROM attendance
+        WHERE tenant_id = ? AND worker_id = ? AND attendance_date = ? AND deleted_at IS NULL FOR UPDATE`,
+      [req.auth.tenantId, req.params.workerId, attendance_date]
+    );
+    const record = records[0];
+    if (record?.check_in_time) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Cannot change status after check-in has been recorded' });
+    }
+    if (record) {
+      await connection.execute(
+        `UPDATE attendance SET status = ?, check_in_time = NULL, check_out_time = NULL,
+                attendance_type = ?, approval_status = 'not_required', approval_note = NULL,
+                approved_by = NULL, approval_updated_at = NULL, evidence_data = NULL, evidence_mime_type = NULL,
+                check_in_latitude = NULL, check_in_longitude = NULL,
+                check_out_latitude = NULL, check_out_longitude = NULL
+          WHERE id = ?`,
+        [status, status, record.id]
+      );
+    } else {
+      await connection.execute(
+        `INSERT INTO attendance (tenant_id, worker_id, attendance_date, status, attendance_type)
+         VALUES (?, ?, ?, ?, ?)`,
+        [req.auth.tenantId, req.params.workerId, attendance_date, status, status]
+      );
+    }
+    await connection.commit();
+    res.json({ data: { worker_id: String(req.params.workerId), attendance_date, status } });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+app.patch('/api/attendance/:workerId/approval', requireAdmin, asyncRoute(async (req, res) => {
+  const { attendance_date: attendanceDate, decision, note = null } = req.body || {};
+  if (!validWorkerId(req.params.workerId) || !validDate(attendanceDate) || !attendanceDate
+    || !['approve', 'reject'].includes(decision)
+    || (note != null && (typeof note !== 'string' || note.trim().length > 500))) {
+    return res.status(400).json({ error: 'Provide a valid worker, date, approval decision, and optional note' });
+  }
+  const [result] = await pool.execute(
+    `UPDATE attendance
+        SET approval_status = ?, approval_note = ?, approved_by = ?, approval_updated_at = CURRENT_TIMESTAMP
+      WHERE tenant_id = ? AND worker_id = ? AND attendance_date = ?
+        AND approval_status = 'pending' AND attendance_type IN ('off', 'permission', 'leave', 'sick', 'dinas')
+        AND deleted_at IS NULL`,
+    [
+      decision === 'approve' ? 'approved' : 'rejected',
+      note?.trim() || null,
+      req.auth.userId,
+      req.auth.tenantId,
+      req.params.workerId,
+      attendanceDate,
+    ]
+  );
+  if (!result.affectedRows) return res.status(409).json({ error: 'No pending attendance request was found for this worker and date' });
+  res.json({
+    data: {
+      worker_id: String(req.params.workerId),
+      attendance_date: attendanceDate,
+      approval_status: decision === 'approve' ? 'approved' : 'rejected',
+      approval_note: note?.trim() || null,
+    },
+  });
+}));
+
+app.get('/api/attendance/:workerId/evidence', asyncRoute(async (req, res) => {
+  const attendanceDate = req.query.date || '';
+  if (!validWorkerId(req.params.workerId) || !validDate(attendanceDate)) {
+    return res.status(400).json({ error: 'Provide a valid worker ID and attendance date' });
+  }
+  const [rows] = await pool.execute(
+    `SELECT evidence_data, evidence_mime_type FROM attendance
+      WHERE tenant_id = ? AND worker_id = ? AND attendance_date = ?
+        AND attendance_type = 'dinas' AND evidence_data IS NOT NULL AND deleted_at IS NULL`,
+    [req.auth.tenantId, req.params.workerId, attendanceDate]
+  );
+  const evidence = rows[0];
+  if (!evidence || !['image/jpeg', 'image/png'].includes(evidence.evidence_mime_type)) {
+    return res.status(404).json({ error: 'Dinas evidence not found' });
+  }
+  res.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Type': evidence.evidence_mime_type,
+  });
+  res.send(evidence.evidence_data);
+}));
+
+app.delete('/api/attendance/:workerId', requireAdmin, asyncRoute(async (req, res) => {
+  const attendanceDate = req.query.date || '';
+  if (!validWorkerId(req.params.workerId) || !validDate(attendanceDate)) {
+    return res.status(400).json({ error: 'Provide a valid worker ID and attendance date' });
+  }
+  const [result] = await pool.execute(
+    `UPDATE attendance SET deleted_at = CURRENT_TIMESTAMP
+      WHERE tenant_id = ? AND worker_id = ? AND attendance_date = ? AND deleted_at IS NULL`,
+    [req.auth.tenantId, req.params.workerId, attendanceDate]
+  );
+  if (!result.affectedRows) return res.status(404).json({ error: 'Attendance record not found' });
+  res.status(204).end();
+}));
+
+app.get('/api/workers', asyncRoute(async (req, res) => {
+  const { status } = req.query;
+  if (status && !WORKER_STATUSES.has(status)) {
+    return res.status(400).json({ error: 'Invalid worker status' });
+  }
+  const query = `SELECT * FROM workers WHERE tenant_id = ? AND deleted_at IS NULL ${status ? 'AND status = ?' : ''} ORDER BY updated_at DESC, id DESC`;
+  const [rows] = await pool.execute(query, status ? [req.auth.tenantId, status] : [req.auth.tenantId]);
+  const data = await Promise.all(rows.map(async (worker) => {
+    const documents = await listWorkerDocuments(req.auth.tenantId, worker.id);
+    return {
+      ...redactWorkerForViewer(worker, req.auth.role),
+      required_document_types: parseRequiredDocuments(worker.required_document_types),
+      documents,
+      eligibility: evaluateEligibility(worker, documents),
+    };
+  }));
+  res.json({ data });
+}));
+
+app.post('/api/workers/:id/attendance-link', requireManager, asyncRoute(async (req, res) => {
+  const connection = await pool.getConnection();
+  let token;
+  let workerId;
+  try {
+    await connection.beginTransaction();
+    const worker = await getWorker(req.auth.tenantId, req.params.id, connection, true);
+    if (!worker || worker.status !== 'active') {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Active worker not found' });
+    }
+    const [settings] = await connection.execute(
+      'SELECT token_salt FROM tenant_attendance_settings WHERE tenant_id = ?',
+      [req.auth.tenantId]
+    );
+    if (!settings[0]) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Configure the company attendance salt in Settings first' });
+    }
+    workerId = String(worker.id);
+    token = createAttendanceToken(req.auth.tenantId, workerId, settings[0].token_salt);
+    await connection.execute(
+      `INSERT INTO worker_attendance_links (tenant_id, worker_id, token_hash, revoked_at)
+       VALUES (?, ?, ?, NULL)
+       ON DUPLICATE KEY UPDATE token_hash = VALUES(token_hash), revoked_at = NULL, updated_at = CURRENT_TIMESTAMP`,
+      [req.auth.tenantId, worker.id, hashAttendanceToken(token)]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  res.status(201).json({ data: { worker_id: workerId, token } });
+}));
+
+app.delete('/api/workers/:id/attendance-link', requireAdmin, asyncRoute(async (req, res) => {
+  const [result] = await pool.execute(
+    `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+      WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
+    [req.auth.tenantId, req.params.id]
+  );
+  if (!result.affectedRows) return res.status(404).json({ error: 'Active attendance link not found' });
+  res.status(204).end();
+}));
+
+app.get('/api/departments', asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT name
+       FROM departments
+      WHERE tenant_id = ?
+      ORDER BY name`,
+    [req.auth.tenantId]
+  );
+  res.json({ data: rows.map(({ name }) => name) });
+}));
+
+app.post('/api/workers', requireManager, asyncRoute(async (req, res) => {
+  const {
+    full_name,
+    email,
+    phone_number,
+    national_id,
+    address,
+    department,
+    position,
+    work_location,
+    contract_type,
+    offer_date,
+    join_date,
+    salary_rate,
+    required_document_types = [],
+  } = req.body || {};
+  if (typeof full_name !== 'string' || !full_name.trim() || full_name.trim().length > 150
+    || typeof position !== 'string' || !position.trim() || position.trim().length > 150
+    || (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+    || !validPhoneNumber(phone_number)
+    || !validNationalId(national_id)
+    || (address != null && (typeof address !== 'string' || address.length > 500))
+    || !validDepartment(department)
+    || (work_location != null && (typeof work_location !== 'string' || work_location.length > 150))
+    || !CONTRACT_TYPES.has(contract_type)
+    || !validDate(offer_date) || !validDate(join_date)
+    || (offer_date && join_date && join_date < offer_date)
+    || !validSalaryRate(salary_rate)
+    || !validRequiredDocuments(required_document_types)) {
+    return res.status(400).json({ error: 'Provide valid worker, contact, department, contract, date, rate, and document details' });
+  }
+  const activeTypes = await activeDocumentTypes(req.auth.tenantId);
+  if (required_document_types.some((type) => !activeTypes.has(type))) {
+    return res.status(400).json({ error: 'Required document types must be active for this company' });
+  }
+  const connection = await pool.getConnection();
+  let workerId;
+  try {
+    await connection.beginTransaction();
+    const normalizedDepartment = normalizeText(department);
+    await connection.execute(
+      `INSERT INTO departments (tenant_id, name, name_hash)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
+      [req.auth.tenantId, normalizedDepartment, hashNormalizedText(department)]
+    );
+    const [result] = await connection.execute(
+      `INSERT INTO workers (
+         tenant_id, full_name, email, email_hash, phone_number, national_id, address,
+         department, position, work_location, contract_type, offer_date, join_date,
+         salary_rate, status, required_document_types
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offered', ?)`,
+      [
+        req.auth.tenantId,
+        normalizeText(full_name),
+        email?.trim().toLowerCase() || null,
+        email ? hashEmail(email) : null,
+        phone_number.trim().replace(/\s+/g, ' '),
+        national_id || null,
+        address ? normalizeText(address) : null,
+        normalizedDepartment,
+        normalizeText(position),
+        work_location ? normalizeText(work_location) : null,
+        contract_type,
+        offer_date || null,
+        join_date || null,
+        salary_rate || null,
+        JSON.stringify(required_document_types),
+      ]
+    );
+    workerId = result.insertId;
+    await connection.execute(
+      `INSERT INTO worker_status_history (tenant_id, worker_id, user_id, previous_status, new_status)
+       VALUES (?, ?, ?, NULL, 'offered')`,
+      [req.auth.tenantId, workerId, req.auth.userId]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  const worker = await getWorker(req.auth.tenantId, workerId);
+  res.status(201).json({
+    data: {
+      ...redactWorkerForViewer(worker, req.auth.role),
+      required_document_types: parseRequiredDocuments(worker.required_document_types),
+      eligibility: evaluateEligibility(worker, []),
+    },
+  });
+}));
+
+app.post('/api/admin/workers/import', requireAdmin, asyncRoute(async (req, res) => {
+  const { workers: importRows } = req.body || {};
+  if (!Array.isArray(importRows) || importRows.length === 0 || importRows.length > 500) {
+    return res.status(400).json({ error: 'Import must contain between 1 and 500 worker rows' });
+  }
+
+  const activeTypes = await activeDocumentTypes(req.auth.tenantId);
+  const [existingRows] = await pool.execute(
+    `SELECT full_name, national_id
+       FROM workers
+      WHERE tenant_id = ? AND deleted_at IS NULL`,
+    [req.auth.tenantId]
+  );
+  const knownNames = new Set(existingRows.map(({ full_name }) => normalizeText(full_name).toLowerCase()));
+  const knownNationalIds = new Set(existingRows.filter(({ national_id }) => national_id).map(({ national_id }) => String(national_id)));
+  const created = [];
+  const skipped = [];
+  const errors = [];
+  const connection = await pool.getConnection();
+  try {
+    for (const [index, row] of importRows.entries()) {
+      const rowNumber = index + 2;
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        errors.push({ row: rowNumber, error: 'Invalid row data' });
+        continue;
+      }
+      const {
+        full_name, email, phone_number, national_id, address, department, position, work_location,
+        contract_type, offer_date, join_date, salary_rate, required_document_types = [],
+      } = row;
+      if (typeof full_name !== 'string' || !full_name.trim() || full_name.trim().length > 150
+        || typeof position !== 'string' || !position.trim() || position.trim().length > 150
+        || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+        || !validPhoneNumber(phone_number) || !validNationalId(national_id)
+        || (address != null && (typeof address !== 'string' || address.length > 500))
+        || !validDepartment(department)
+        || (work_location != null && (typeof work_location !== 'string' || work_location.length > 150))
+        || !CONTRACT_TYPES.has(contract_type)
+        || !validDate(offer_date) || !validDate(join_date)
+        || (offer_date && join_date && join_date < offer_date)
+        || !validSalaryRate(salary_rate) || !validRequiredDocuments(required_document_types)
+        || required_document_types.some((type) => !activeTypes.has(type))) {
+        errors.push({ row: rowNumber, error: 'Invalid worker fields or inactive required document type' });
+        continue;
+      }
+      const normalizedName = normalizeText(full_name).toLowerCase();
+      const normalizedNationalId = national_id || null;
+      if (knownNames.has(normalizedName) || (normalizedNationalId && knownNationalIds.has(normalizedNationalId))) {
+        skipped.push({ row: rowNumber, reason: 'Duplicate worker name or NIK' });
+        continue;
+      }
+      const emailHash = hashEmail(email);
+      const [existingEmail] = await connection.execute(
+        'SELECT id FROM workers WHERE tenant_id = ? AND email_hash = ? AND deleted_at IS NULL',
+        [req.auth.tenantId, emailHash]
+      );
+      if (existingEmail.length) {
+        skipped.push({ row: rowNumber, reason: 'Duplicate email' });
+        continue;
+      }
+
+      try {
+        await connection.beginTransaction();
+        const normalizedDepartment = normalizeText(department);
+        await connection.execute(
+          `INSERT INTO departments (tenant_id, name, name_hash)
+           VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
+          [req.auth.tenantId, normalizedDepartment, hashNormalizedText(department)]
+        );
+        const [result] = await connection.execute(
+          `INSERT INTO workers (
+             tenant_id, full_name, email, email_hash, phone_number, national_id, address,
+             department, position, work_location, contract_type, offer_date, join_date,
+             salary_rate, status, required_document_types
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offered', ?)`,
+          [
+            req.auth.tenantId, normalizeText(full_name), email.trim().toLowerCase(), emailHash,
+            phone_number.trim().replace(/\s+/g, ' '), normalizedNationalId,
+            address ? normalizeText(address) : null, normalizedDepartment, normalizeText(position),
+            work_location ? normalizeText(work_location) : null, contract_type,
+            offer_date || null, join_date || null, salary_rate || null,
+            JSON.stringify(required_document_types),
+          ]
+        );
+        await connection.execute(
+          `INSERT INTO worker_status_history (tenant_id, worker_id, user_id, previous_status, new_status)
+           VALUES (?, ?, ?, NULL, 'offered')`,
+          [req.auth.tenantId, result.insertId, req.auth.userId]
+        );
+        await connection.commit();
+        knownNames.add(normalizedName);
+        if (normalizedNationalId) knownNationalIds.add(normalizedNationalId);
+        created.push({ row: rowNumber, worker_id: String(result.insertId) });
+      } catch (error) {
+        await connection.rollback();
+        if (error.code === 'ER_DUP_ENTRY') skipped.push({ row: rowNumber, reason: 'Duplicate worker data' });
+        else throw error;
+      }
+    }
+  } finally {
+    connection.release();
+  }
+  res.status(201).json({ data: { created, skipped, errors } });
+}));
+
+app.get('/api/workers/:id', asyncRoute(async (req, res) => {
+  const worker = await getWorker(req.auth.tenantId, req.params.id);
+  if (!worker) return res.status(404).json({ error: 'Worker not found' });
+  const documents = await listWorkerDocuments(req.auth.tenantId, worker.id);
+  const [history] = await pool.execute(
+    `SELECT h.id, h.previous_status, h.new_status, h.created_at, u.email AS changed_by
+       FROM worker_status_history h LEFT JOIN users u ON u.id = h.user_id
+      WHERE h.tenant_id = ? AND h.worker_id = ? ORDER BY h.created_at DESC`,
+    [req.auth.tenantId, worker.id]
+  );
+  res.json({
+    data: {
+      ...redactWorkerForViewer(worker, req.auth.role),
+      required_document_types: parseRequiredDocuments(worker.required_document_types),
+      documents,
+      history,
+      eligibility: evaluateEligibility(worker, documents),
+    },
+  });
+}));
+
+app.patch('/api/workers/:id', requireAdmin, asyncRoute(async (req, res) => {
+  const worker = await getWorker(req.auth.tenantId, req.params.id);
+  if (!worker) return res.status(404).json({ error: 'Worker not found' });
+  const fields = {
+    full_name: ['full_name', (value) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 150, normalizeText],
+    email: ['email', (value) => typeof value === 'string' && value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()), (value) => value.trim().toLowerCase()],
+    phone_number: ['phone_number', validPhoneNumber, (value) => value.trim().replace(/\s+/g, ' ')],
+    national_id: ['national_id', validNationalId, (value) => value || null],
+    address: ['address', (value) => value == null || (typeof value === 'string' && value.length <= 500), (value) => value ? normalizeText(value) : null],
+    department: ['department', validDepartment, normalizeText],
+    position: ['position', (value) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 150, normalizeText],
+    work_location: ['work_location', (value) => value == null || (typeof value === 'string' && value.length <= 150), (value) => value ? normalizeText(value) : null],
+    contract_type: ['contract_type', (value) => CONTRACT_TYPES.has(value), (value) => value],
+    offer_date: ['offer_date', validDate, (value) => value || null],
+    join_date: ['join_date', validDate, (value) => value || null],
+    salary_rate: ['salary_rate', validSalaryRate, (value) => value || null],
+  };
+  const body = req.body || {};
+  const updates = Object.entries(fields).filter(([key]) => Object.hasOwn(body, key));
+  const updatesRequiredDocuments = Object.hasOwn(body, 'required_document_types');
+  if (!updates.length && !updatesRequiredDocuments) {
+    return res.status(400).json({ error: 'Provide valid worker fields to update' });
+  }
+  if (updates.some(([key, [, validate]]) => !validate(body[key]))
+    || (updatesRequiredDocuments && !validRequiredDocuments(body.required_document_types))) {
+    return res.status(400).json({ error: 'Provide valid worker fields to update' });
+  }
+  if (updatesRequiredDocuments) {
+    const activeTypes = await activeDocumentTypes(req.auth.tenantId);
+    const existingRequirements = new Set(parseRequiredDocuments(worker.required_document_types));
+    if (body.required_document_types.some((type) => !activeTypes.has(type) && !existingRequirements.has(type))) {
+      return res.status(400).json({ error: 'Required document types must be active for this company' });
+    }
+  }
+  if (Object.hasOwn(body, 'email')) {
+    const [duplicateEmail] = await pool.execute(
+      'SELECT id FROM workers WHERE tenant_id = ? AND email_hash = ? AND id <> ? AND deleted_at IS NULL',
+      [req.auth.tenantId, hashEmail(body.email), worker.id]
+    );
+    if (duplicateEmail.length) return res.status(409).json({ error: 'A worker with this email already exists' });
+  }
+  const nextOfferDate = Object.hasOwn(body, 'offer_date') ? body.offer_date : worker.offer_date;
+  const nextJoinDate = Object.hasOwn(body, 'join_date') ? body.join_date : worker.join_date;
+  if (nextOfferDate && nextJoinDate && String(nextJoinDate).slice(0, 10) < String(nextOfferDate).slice(0, 10)) {
+    return res.status(400).json({ error: 'Join date cannot be earlier than offer date' });
+  }
+  if (Object.hasOwn(body, 'department')) {
+    const normalizedDepartment = normalizeText(body.department);
+    await pool.execute(
+      `INSERT INTO departments (tenant_id, name, name_hash)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
+      [req.auth.tenantId, normalizedDepartment, hashNormalizedText(body.department)]
+    );
+  }
+  const assignments = [];
+  const values = [];
+  for (const [key, [, , normalize]] of updates) {
+    if (key === 'email') {
+      assignments.push('email = ?', 'email_hash = ?');
+      values.push(normalize(body[key]), hashEmail(body[key]));
+    } else {
+      assignments.push(`\`${key}\` = ?`);
+      values.push(normalize(body[key]));
+    }
+    if (updatesRequiredDocuments) {
+      assignments.push('required_document_types = ?');
+      values.push(JSON.stringify(body.required_document_types));
+    }
+  }
+  values.push(worker.id, req.auth.tenantId);
+  await pool.execute(
+    `UPDATE workers SET ${assignments.join(', ')} WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+    values
+  );
+  const updated = await getWorker(req.auth.tenantId, worker.id);
+  const documents = await listWorkerDocuments(req.auth.tenantId, worker.id);
+  res.json({
+    data: {
+      ...redactWorkerForViewer(updated, req.auth.role),
+      required_document_types: parseRequiredDocuments(updated.required_document_types),
+      documents,
+      eligibility: evaluateEligibility(updated, documents),
+    },
+  });
+}));
+
+app.delete('/api/workers/:id', requireAdmin, asyncRoute(async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [result] = await connection.execute(
+      `UPDATE workers SET deleted_at = CURRENT_TIMESTAMP, scheduled_inactive_date = NULL
+        WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [req.params.id, req.auth.tenantId]
+    );
+    if (!result.affectedRows) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Worker not found' });
+    }
+    await connection.execute(
+      `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
+      [req.auth.tenantId, req.params.id]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  res.status(204).end();
+}));
+
+app.get('/api/workers/:id/eligibility', asyncRoute(async (req, res) => {
+  const worker = await getWorker(req.auth.tenantId, req.params.id);
+  if (!worker) return res.status(404).json({ error: 'Worker not found' });
+  const documents = await listWorkerDocuments(req.auth.tenantId, worker.id);
+  res.json({ data: { worker_id: worker.id, status: worker.status, ...evaluateEligibility(worker, documents) } });
+}));
+
+app.post('/api/workers/:id/documents', requireManager, asyncRoute(async (req, res) => {
+  const worker = await getWorker(req.auth.tenantId, req.params.id);
+  if (!worker) return res.status(404).json({ error: 'Worker not found' });
+  const { type, status = 'pending' } = req.body || {};
+  const dateFields = documentDateFields(status, req.body || {});
+  const activeTypes = await activeDocumentTypes(req.auth.tenantId);
+  const allowedForExistingWorker = !activeTypes.has(type)
+    && parseRequiredDocuments(worker.required_document_types).includes(type);
+  if ((!activeTypes.has(type) && !allowedForExistingWorker) || !DOCUMENT_STATUSES.has(status)
+    || !dateFields) {
+    return res.status(400).json({ error: 'Invalid document type, status, or dates' });
+  }
+  const [result] = await pool.execute(
+    `INSERT INTO documents (
+       tenant_id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      req.auth.tenantId,
+      worker.id,
+      type,
+      status,
+      dateFields.valid_from,
+      dateFields.valid_until,
+      dateFields.target_completion_date,
+    ]
+  );
+  const [rows] = await pool.execute(
+    `SELECT id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date, created_at, updated_at
+       FROM documents WHERE id = ? AND tenant_id = ?`,
+    [result.insertId, req.auth.tenantId]
+  );
+  const document = rows[0];
+  res.status(201).json({
+    data: {
+      ...document,
+      valid_from: document.valid_from ? String(document.valid_from).slice(0, 10) : null,
+      valid_until: document.valid_until ? String(document.valid_until).slice(0, 10) : null,
+      target_completion_date: document.target_completion_date ? String(document.target_completion_date).slice(0, 10) : null,
+    },
+  });
+}));
+
+app.delete('/api/workers/:id/documents/:documentId', requireAdmin, asyncRoute(async (req, res) => {
+  const worker = await getWorker(req.auth.tenantId, req.params.id);
+  if (!worker) return res.status(404).json({ error: 'Worker not found' });
+  const [result] = await pool.execute(
+    `UPDATE documents SET deleted_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND worker_id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+    [req.params.documentId, worker.id, req.auth.tenantId]
+  );
+  if (!result.affectedRows) return res.status(404).json({ error: 'Document not found' });
+  res.status(204).end();
+}));
+
+app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const worker = await getWorker(req.auth.tenantId, req.params.id, connection, true);
+    if (!worker) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Worker not found' });
+    }
+    const { status, effective_date: effectiveDate } = req.body || {};
+    const [todayRows] = await connection.execute("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today");
+    if (status === 'inactive' && effectiveDate != null && !validDate(effectiveDate)) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Effective inactive date must use YYYY-MM-DD format' });
+    }
+    if (status !== 'inactive' && effectiveDate != null) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Effective date is only supported for inactive status' });
+    }
+    if (!WORKER_STATUSES.has(status) || status === worker.status
+      || !canTransitionStatus(worker.status, status)) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Status transition is not allowed' });
+    }
+    if (status === 'inactive' && effectiveDate && effectiveDate > todayRows[0].today) {
+      await connection.execute(
+        `UPDATE workers SET scheduled_inactive_date = ?
+          WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+        [effectiveDate, worker.id, req.auth.tenantId]
+      );
+      await connection.commit();
+      return res.json({ data: { id: String(worker.id), status: worker.status, scheduled_inactive_date: effectiveDate } });
+    }
+    if (status === 'active') {
+      const documents = await listWorkerDocuments(req.auth.tenantId, worker.id, connection);
+      if (!evaluateEligibility(worker, documents).eligible) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Worker cannot be activated until all required documents are valid' });
+      }
+    }
+    await connection.execute(
+      'UPDATE workers SET status = ?, scheduled_inactive_date = NULL WHERE id = ? AND tenant_id = ?',
+      [status, worker.id, req.auth.tenantId]
+    );
+    if (status === 'inactive') {
+      await connection.execute(
+        `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
+        [req.auth.tenantId, worker.id]
+      );
+    }
+    await connection.execute(
+      `INSERT INTO worker_status_history (tenant_id, worker_id, user_id, previous_status, new_status)
+       VALUES (?, ?, ?, ?, ?)`,
+      [req.auth.tenantId, worker.id, req.auth.userId, worker.status, status]
+    );
+    await connection.commit();
+    res.json({ data: { id: worker.id, status } });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+app.use('/api', (req, res) => res.status(404).json({ error: 'API route not found' }));
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Image must be 900 KB or smaller after compression' });
+    }
+    return res.status(400).json({ error: 'Upload one JPG or PNG image at a time' });
+  }
+  if (error.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Request body must contain valid JSON' });
+  }
+  if (error.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body is too large' });
+  }
+  if (error.code === 'ER_DUP_ENTRY') {
+    return res.status(409).json({ error: 'A record with these details already exists' });
+  }
+  console.error(error);
+  res.status(500).json({ error: 'An unexpected server error occurred' });
+});
+
+async function applyScheduledInactivations() {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [workers] = await connection.execute(
+      `SELECT id, tenant_id, status
+         FROM workers
+        WHERE deleted_at IS NULL AND scheduled_inactive_date <= CURDATE()
+          AND status <> 'inactive'
+        FOR UPDATE`
+    );
+    for (const worker of workers) {
+      await connection.execute(
+        `UPDATE workers SET status = 'inactive', scheduled_inactive_date = NULL
+          WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+        [worker.id, worker.tenant_id]
+      );
+      await connection.execute(
+        `INSERT INTO worker_status_history (tenant_id, worker_id, user_id, previous_status, new_status)
+         VALUES (?, ?, NULL, ?, 'inactive')`,
+        [worker.tenant_id, worker.id, worker.status]
+      );
+      await connection.execute(
+        `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
+        [worker.tenant_id, worker.id]
+      );
+    }
+    await connection.commit();
+    return workers.length;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+async function startServer() {
+  getJwtSecret();
+  await initializeDatabase();
+  await applyScheduledInactivations();
+  const scheduledInactivationTimer = setInterval(() => {
+    applyScheduledInactivations().catch((error) => console.error('Scheduled worker inactivation failed:', error));
+  }, 60 * 1000);
+  scheduledInactivationTimer.unref();
+  app.listen(PORT, () => console.log(`HRD API listening on http://localhost:${PORT}`));
+}
+
+if (require.main === module) {
+  startServer().catch((error) => {
+    console.error('Failed to start HRD API:', error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  app,
+  evaluateEligibility,
+  validDate,
+  validDocumentWarningThreshold,
+  attendanceMonthRange,
+  validRequiredDocuments,
+  documentTypeCode,
+  documentDateFields,
+  parseRequiredDocuments,
+  canTransitionStatus,
+  hashEmail,
+  validPhoneNumber,
+  validNationalId,
+  validDepartment,
+  normalizeText,
+  normalizeDocumentTypeName,
+  hashNormalizedText,
+  validSalaryRate,
+  validPassword,
+  validProfilePhotoUrl,
+  profilePhotoMimeType,
+  MAX_PROFILE_PHOTO_BYTES,
+  validAttendanceToken,
+  createAttendanceToken,
+  hashAttendanceToken,
+  attendanceTokenMatches,
+  validWorkerId,
+  validCoordinates,
+  distanceInMeters,
+  parseAllowedActivities,
+  matchRequiredAttendanceLocation,
+  validAttendanceLocationInput,
+  requireManager,
+  requireAdmin,
+  applyScheduledInactivations,
+  initializeDatabase,
+  pool,
+};

@@ -1,0 +1,73 @@
+# Master Directives
+
+## Peran
+
+Bertindak sebagai Lead Developer dan Project Manager untuk membangun produk SaaS ini. Jaga agar keputusan teknis, urutan pekerjaan, dan perubahan backend/frontend selaras.
+
+## Ringkasan produk
+
+Produk ini adalah SaaS HRD untuk client/perusahaan yang mengelola proses pekerja mulai setelah offering letter diberikan. Alur yang sudah diketahui:
+
+1. Pekerja menerima offering letter.
+2. Persyaratan pra-aktif ditentukan perusahaan melalui katalog jenis dokumen dinamis; sistem tidak menetapkan jenis dokumen bawaan.
+3. Pekerja dapat menjadi aktif setelah dokumen yang diwajibkan perusahaan lengkap, valid, dan masih dalam masa berlaku.
+4. Ketika tidak lagi aktif, pekerja berpindah ke status nonaktif.
+
+Sistem ditujukan untuk client perusahaan. Pekerja dicatat setelah offering letter; katalog dokumen wajib dimulai kosong dan Admin perusahaan menentukan sendiri jenis yang akan digunakan serta pilihan wajib tiap pekerja. Kelayakan dihitung dari dokumen wajib yang berstatus valid dan masih dalam rentang tanggal berlaku.
+
+## Keputusan MVP yang disepakati
+
+- Backend: Node.js + Express; frontend: React + Vite; database: MySQL.
+- Saat startup, backend membuat database dan tabel yang belum ada. Tidak ada seed/mock data.
+- Registrasi membuat tenant perusahaan dan akun admin pertama. Sesi memakai cookie HttpOnly.
+- Pengaturan akun MVP mencakup edit nama, unggah foto profil JPG/PNG ke MySQL, ubah password dengan verifikasi password lama, serta manajemen user tenant oleh Admin. Frontend mengecilkan gambar hingga maksimal 900 KiB agar kompatibel dengan `max_allowed_packet` MariaDB lama (terkonfirmasi 1 MiB); backend memvalidasi signature JPG/PNG dan batas ukuran. Foto dilayani melalui endpoint terautentikasi. Password memakai bcrypt; perubahan password/role/status mencabut sesi terkait. Admin tidak dapat menghilangkan admin aktif terakhir. Undangan email dan pemilihan tenant/database lain belum didukung.
+- Jenis dokumen persyaratan disimpan dinamis per tenant pada tabel `document_types`; katalog tenant baru kosong dan tidak ada pilihan bawaan. Admin dapat tambah, edit nama, dan nonaktifkan/aktifkan jenis. Nama disimpan lowercase setelah trim/rapikan spasi dan ditampilkan uppercase di UI; kode baru dibuat dari nama sebagai slug huruf kecil dengan underscore (contoh `Sertifikat K3` → `sertifikat_k3`) dan tetap stabil saat nama diedit. Dokumen nonaktif tidak tersedia untuk pekerja baru, tetapi tetap dapat dicatat untuk memenuhi persyaratan pekerja yang sudah ada. Saat migrasi, data teks lama dinormalisasi lowercase; jenis bawaan lama yang tak terpakai dihapus, yang masih dirujuk dipertahankan nonaktif.
+- Form pencatatan dokumen menampilkan tanggal sesuai status: `pending` memakai target selesai, `valid`/`expired` memakai rentang berlaku, dan `rejected` tanpa tanggal. Backend mengabaikan tanggal yang tidak relevan dengan status dan menyimpan target selesai tersendiri.
+- Pengaturan pemantauan dokumen berada di tab Pengaturan Dokumen. Default per tenant disimpan pada `tenant_document_settings` (1–365 hari, default 30), sedangkan `document_types.warning_threshold_days` menyimpan override nullable per jenis; `NULL` mengikuti default tenant. Dashboard dan daftar tindak lanjut memakai ambang efektif per jenis dokumen, tetap menampilkan dokumen kedaluwarsa, dan tanggal acuan backend adalah UTC.
+- Presensi memakai tautan bearer statis berbasis HMAC-SHA256 dari tenant, ID pekerja, salt acak tenant 256-bit, dan `JWT_SECRET`; salt tidak pernah dikirim ke browser. Admin dapat membuat/merotasi salt, yang membatalkan seluruh tautan lama; tindakan rotasi memakai modal dua tahap dan wajib mengetik frasa konfirmasi. Admin/HR Staff dapat membuat link deterministik; pencabutan hanya Admin. Link hanya berlaku untuk pekerja aktif. Admin mengelola titik lokasi tenant pada peta Leaflet dengan basemap CARTO Light publik (atribusi OpenStreetMap dan CARTO; penggunaan tunduk pada ketentuan penyedia tile), radius 25–5000 meter, serta aktivitas yang diwajibkan berada di tiap area. Aktivitas yang dicentang wajib berada dalam radius salah satu area yang mencentangnya; aktivitas yang tidak dicentang pada area mana pun boleh dilakukan dari luar geofence. API backend menghitung jarak haversine dan menegakkan aturan tersebut; validasi browser hanya untuk umpan balik dan koordinat GPS bukan bukti anti-spoofing. Permintaan status Off/Izin/Cuti/Sakit menunggu persetujuan Admin. Dinas dikecualikan dari geofence, tetapi Check-In memerlukan bukti JPG/PNG maksimal 900 KiB yang dikompresi browser dan disimpan sebagai BLOB MySQL; satu record harian berstatus pending sampai Admin menyetujui/menolak. Check-Out Dinas boleh melengkapi record pending dan tidak meminta foto baru; setelah ditolak pekerja dapat mengajukan ulang. Role terautentikasi dapat membaca rekap presensi dan bukti sesuai tenant. Batas bukti 900 KiB mengikuti `max_allowed_packet` MariaDB aktif 1 MiB. Aturan retensi lokasi/bukti masih perlu ditetapkan sebelum produksi. Tanggal/waktu mengikuti timezone koneksi/database yang harus diselaraskan dengan kebijakan operasional perusahaan.
+- Menu Presensi HR menyediakan kartu metrik, pusat persetujuan klaim pending dengan tinjauan bukti Dinas dan aksi setuju/tolak, serta matriks presensi bulanan tenant-scoped dengan pencarian, opsi 25/50/100 baris, pagination, dan scroll horizontal. `Terlambat` hanya dipetakan jika ada status yang menyatakannya; kalkulasi keterlambatan memerlukan konfigurasi jadwal/shift yang belum termasuk MVP.
+- RBAC wajib ditegakkan UI dan API: Admin mengelola pengaturan, perubahan status pekerja, status manual presensi, persetujuan dan pencabutan link; HR Staff membuat pekerja/dokumen/link dan membaca data operasional, tanpa update destruktif; Viewer hanya membaca. Soft-delete data pekerja, dokumen, dan presensi hanya Admin; data tetap tersimpan, tidak tampil pada daftar operasional, dan arsip pekerja mencabut link presensi. Semua role melihat hanya Profil Saya dan Keamanan pada Pengaturan kecuali Admin; seluruh endpoint data tetap tenant-scoped dan role-checked.
+- Halaman Ringkasan menampilkan Offering, Pra-aktif, Aktif, Nonaktif, dokumen yang perlu ditindaklanjuti, dan klaim presensi pending dari API tenant; metrik diperbarui otomatis setiap 15 detik saat Ringkasan dibuka. Preferensi tema Standard, Dark, atau Compact/Clean disimpan lokal per browser dan diterapkan tanpa mengubah sesi.
+- Halaman pekerja presensi menampilkan informasi aktual hanya melalui URL bertoken `/presensi?worker_id=...&token=...`; ID worker saja tidak cukup untuk mengakses data. Jam antarmuka ditampilkan dalam WIB, API mengembalikan maksimum 30 catatan riwayat, dan navigasi Pengajuan/Auto hanya memberi informasi karena alur pengajuan/otomatis belum termasuk MVP.
+- Siklus awal: `offered` → `preactive` → `active` atau `inactive`; pekerja nonaktif dapat diaktifkan kembali setelah persyaratannya valid.
+- Penonaktifan dapat langsung dilakukan atau dijadwalkan dengan tanggal efektif. `scheduled_inactive_date` diproses idempotent saat backend startup dan berkala setiap menit; proses mencatat riwayat status dan mencabut tautan presensi. Admin saja yang dapat mengubah data pekerja/status dan mengelola jadwal.
+- Admin dapat mengedit pekerja dan mengimpor/mengekspor `.xlsx`. File impor dibaca di browser dan tidak pernah diunggah; backend menerima maksimal 500 record JSON, memvalidasi ulang tiap record, melewati duplikasi nama/NIK/email, dan mencatat hasil per baris. HR Staff dan Viewer tidak mendapat kontrol impor/ekspor atau edit/hapus.
+- Kelayakan hanya rekomendasi; HRD mengubah status secara manual. Aktivasi dibatasi pada pekerja pra-aktif/nonaktif dengan seluruh dokumen wajib valid. MCU, PKWT, dan SIM memerlukan tanggal kedaluwarsa; sertifikasi boleh tanpa tanggal kedaluwarsa.
+- MCU hanya disimpan sebagai metadata/status/masa berlaku; hasil medis rinci tidak masuk ke sistem.
+- Teks nama, alamat, departemen/divisi, posisi, area kerja, nama perusahaan/akun, dan nama dokumen dinormalisasi server-side (trim, spasi berulang diringkas, lowercase) serta ditampilkan uppercase di UI. Departemen/divisi bersifat pilihan fleksibel per tenant dan nilai duplikat karena kapitalisasi/spasi harus digabung.
+- Otomatisasi penonaktifan berdasarkan kelayakan/dokumen, pengingat masa tenggang dokumen, undangan email, izin granular, dan upload dokumen pekerja belum termasuk MVP. Penonaktifan terjadwal yang dipilih Admin didukung.
+
+## Ruang lingkup
+
+- Backend: folder `../backend/`.
+- Frontend: folder `../frontend/`.
+- Backlog backend: `../backend/backend-tasks.md`.
+- Backlog frontend: `../frontend/frontend-task.md`.
+- Arahan proyek ini: file ini.
+
+## Arahan kerja
+
+1. Sebelum mengubah kode, periksa struktur proyek, perubahan yang sudah ada, dan backlog terkait. Pertahankan perubahan pengguna yang belum selesai.
+2. Gunakan ringkasan produk serta keputusan MVP di atas. Jangan mengasumsikan aturan yang belum ditentukan, seperti masa tenggang, pengingat otomatis, kewajiban dokumen yang berlaku umum, atau alasan pekerja nonaktif.
+3. Untuk keputusan yang berdampak pada arsitektur, keamanan, biaya operasional, atau kontrak API, dokumentasikan pilihan dan alasannya; tanyakan bila beberapa pilihan sama-sama masuk akal.
+4. Pecah pekerjaan menjadi tugas kecil yang dapat diverifikasi. Perbarui status dan catatan backlog setelah menyelesaikan pekerjaan.
+5. Backend dan frontend harus menyepakati kontrak API, model data, validasi, penanganan error, autentikasi, dan kebutuhan tenant sebelum mengintegrasikannya.
+6. Lindungi data dan batas antar-tenant sebagai persyaratan desain SaaS. Jangan menganggap autentikasi saja cukup untuk mengisolasi data tenant.
+7. Perlakukan informasi MCU dan dokumen identitas/ketenagakerjaan sebagai data sensitif. Simpan hanya data yang diperlukan; jangan menampilkan atau menyimpan hasil medis rinci kecuali kebutuhan dan dasar pengelolaannya telah disepakati.
+8. Jalankan validasi terkecil yang relevan untuk setiap perubahan; laporkan hasil dan keterbatasannya secara jelas.
+9. Buat perubahan sesempit mungkin, ikuti pola serta dokumentasi yang sudah ada, dan jangan memasukkan rahasia atau data sensitif ke repository.
+
+## Review perubahan
+
+Pada setiap sesi kerja yang menyentuh proyek:
+
+- Tinjau perubahan baru pada `../backend/` dan `../frontend/`, termasuk perubahan yang tidak dibuat pada sesi tersebut.
+- Identifikasi dampak lintas proyek, ketidaksesuaian kontrak, risiko regresi, serta dokumentasi atau backlog yang perlu diperbarui.
+- Jangan menghapus atau menimpa perubahan yang belum ditinjau. Jika konflik atau maksud perubahan tidak jelas, minta arahan sebelum melanjutkan.
+- Laporkan ringkasan perubahan, pemeriksaan yang dijalankan, masalah yang ditemukan, dan tugas lanjutan.
+
+Pemantauan dilakukan sebagai review saat sesi kerja; dokumen ini tidak menjalankan watcher latar belakang secara otomatis.
+
+## Prioritas awal
+
+Fondasi MVP telah dibuat. Prioritas berikutnya adalah validasi operasional dengan MySQL, pengujian alur ujung-ke-ujung, lalu pendalaman aturan dokumen/status sebelum memperluas fitur. Database SQLite lama tidak digunakan oleh aplikasi baru dan tidak dimigrasikan; jangan menghapusnya tanpa arahan eksplisit.
