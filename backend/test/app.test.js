@@ -29,6 +29,7 @@ const {
   validWorkerId,
   validCoordinates,
   distanceInMeters,
+  implausibleLocationMovement,
   parseAllowedActivities,
   matchRequiredAttendanceLocation,
   validAttendanceLocationInput,
@@ -272,6 +273,13 @@ test('attendance validates worker IDs and geolocation coordinates', () => {
   assert.equal(validCoordinates(0, -180.01), false);
   assert.equal(validCoordinates('40.7', -73), false);
   assert.equal(validCoordinates(Number.NaN, 0), false);
+});
+
+test('anti-mock movement heuristic rejects physically implausible location jumps', () => {
+  assert.equal(implausibleLocationMovement(36000, 60), true);
+  assert.equal(implausibleLocationMovement(1000, 60), false);
+  assert.equal(implausibleLocationMovement(36000, 0), false);
+  assert.equal(implausibleLocationMovement(36000, 25 * 60 * 60), false);
 });
 
 test('monthly attendance range validates year-month and handles leap years', () => {

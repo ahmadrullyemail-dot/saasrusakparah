@@ -88,7 +88,16 @@ function requestLocation() {
   }
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) => resolve({ latitude: coords.latitude, longitude: coords.longitude }),
+      (position) => resolve({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        speed: position.coords.speed,
+        isMocked: position.isMocked === true
+          || position.mocked === true
+          || position.coords.isMocked === true
+          || position.coords.mocked === true,
+      }),
       (error) => {
         const message = error.code === error.PERMISSION_DENIED
           ? 'Izinkan akses lokasi di browser untuk mencatat presensi.'
@@ -144,6 +153,7 @@ function TimerPanel({
   currentTime,
   error,
   notice,
+  locationWarning,
   activity,
   onActivityChange,
   evidenceFile,
@@ -230,8 +240,14 @@ function TimerPanel({
         )}
       </section>
 
-      {error && <div className="attendance-feedback error" role="alert">{error}</div>}
+      {error && !locationWarning && <div className="attendance-feedback error" role="alert">{error}</div>}
       {notice && <div className="attendance-feedback success" role="status">{notice}</div>}
+      {attendance.anti_mock_location_enabled && (
+        <div className="attendance-anti-mock-notice">
+          Anti-Mock Location aktif. Browser akan menolak sinyal mock yang tersedia, akurasi di atas 1.000 meter, dan kecepatan yang tidak masuk akal. Pemeriksaan web tidak dapat membuktikan keaslian GPS sepenuhnya.
+        </div>
+      )}
+      {locationWarning && <div className="attendance-feedback error" role="alert">{locationWarning}</div>}
       {action ? (
         <section className="attendance-action-card">
           {action !== 'check_out' && (
@@ -271,7 +287,7 @@ function TimerPanel({
             disabled={isDinas ? action !== 'check_out' && !evidenceFile : false}
             onClick={onAction}
           />
-          <small>Lokasi GPS browser dapat dipengaruhi pengaturan perangkat dan bukan bukti anti-spoofing.</small>
+          {!attendance.anti_mock_location_enabled && <small>Lokasi GPS browser dapat dipengaruhi pengaturan perangkat dan bukan bukti anti-spoofing.</small>}
         </section>
       ) : (
         <div className="attendance-complete">
@@ -325,6 +341,7 @@ export default function Presensi() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [locationWarning, setLocationWarning] = useState('');
   const [section, setSection] = useState('timer');
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [activity, setActivity] = useState('regular');
@@ -364,8 +381,26 @@ export default function Presensi() {
     setBusy(true);
     setError('');
     setNotice('');
+    setLocationWarning('');
     try {
       const location = await requestLocation();
+      if (attendance.anti_mock_location_enabled) {
+        if (location.isMocked) {
+          const warning = 'Presensi diblokir: perangkat/browser menandai koordinat ini sebagai lokasi mock.';
+          setLocationWarning(warning);
+          throw new Error(warning);
+        }
+        if (!Number.isFinite(location.accuracy) || location.accuracy <= 0 || location.accuracy > 1000) {
+          const warning = 'Presensi diblokir: akurasi GPS lebih buruk dari 1.000 meter. Aktifkan lokasi presisi dan coba lagi.';
+          setLocationWarning(warning);
+          throw new Error(warning);
+        }
+        if (location.speed != null && (!Number.isFinite(location.speed) || location.speed < 0 || location.speed > 300)) {
+          const warning = 'Presensi diblokir: kecepatan GPS tidak masuk akal.';
+          setLocationWarning(warning);
+          throw new Error(warning);
+        }
+      }
       const requiredActivity = action === 'request_status' ? selectedActivity : action;
       const requiredLocations = selectedActivity === 'dinas'
         ? []
@@ -385,6 +420,9 @@ export default function Presensi() {
         action,
         latitude: location.latitude,
         longitude: location.longitude,
+        is_mocked: location.isMocked,
+        location_accuracy: location.accuracy,
+        location_speed: location.speed == null ? '' : location.speed,
         ...(selectedActivity === 'dinas' ? { request_type: 'dinas' } : {}),
         ...(action === 'request_status' ? { request_type: selectedActivity } : {}),
       };
@@ -478,6 +516,7 @@ export default function Presensi() {
                   currentTime={currentTime}
                   error={error}
                   notice={notice}
+                  locationWarning={locationWarning}
                   activity={activity}
                   onActivityChange={(value) => {
                     setActivity(value);

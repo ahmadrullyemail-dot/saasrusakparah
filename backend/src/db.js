@@ -35,6 +35,9 @@ async function initializeDatabase() {
     await connection.end();
   }
 
+  const [versionRows] = await pool.query('SELECT VERSION() AS server_version');
+  const generatedColumnStorage = /mariadb/i.test(versionRows[0].server_version) ? 'PERSISTENT' : 'STORED';
+
   const statements = [
     `CREATE TABLE IF NOT EXISTS tenants (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -59,6 +62,21 @@ async function initializeDatabase() {
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY uq_users_email_hash (email_hash),
       CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS audit_events (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      tenant_id BIGINT UNSIGNED NOT NULL,
+      user_id BIGINT UNSIGNED NULL,
+      actor_name VARCHAR(150) NOT NULL,
+      actor_role VARCHAR(32) NOT NULL,
+      action VARCHAR(24) NOT NULL,
+      entity_type VARCHAR(48) NOT NULL,
+      entity_id VARCHAR(64) NULL,
+      description VARCHAR(1000) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY ix_audit_events_tenant_created (tenant_id, created_at, id),
+      CONSTRAINT fk_audit_events_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      CONSTRAINT fk_audit_events_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
     ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS workers (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -153,7 +171,8 @@ async function initializeDatabase() {
     ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS tenant_attendance_settings (
       tenant_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-      token_salt BINARY(32) NOT NULL,
+      token_salt BINARY(32) NULL,
+      anti_mock_location_enabled TINYINT(1) NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       CONSTRAINT fk_attendance_settings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
@@ -200,7 +219,7 @@ async function initializeDatabase() {
       evidence_mime_type VARCHAR(32) NULL,
       status ENUM('present', 'permission', 'sick', 'absent', 'off', 'leave', 'dinas') NOT NULL DEFAULT 'present',
       deleted_at DATETIME NULL,
-      active_attendance_date DATE GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN attendance_date ELSE NULL END) STORED,
+      active_attendance_date DATE GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN attendance_date ELSE NULL END) ${generatedColumnStorage},
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uq_attendance_worker_active_date (tenant_id, worker_id, active_attendance_date),
@@ -211,6 +230,21 @@ async function initializeDatabase() {
 
   for (const statement of statements) {
     await pool.query(statement);
+  }
+
+  const [attendanceSettingColumns] = await pool.execute(
+    `SELECT COLUMN_NAME, IS_NULLABLE FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tenant_attendance_settings'`,
+    [databaseName]
+  );
+  const attendanceSettingColumnMap = new Map(attendanceSettingColumns.map((column) => [column.COLUMN_NAME, column.IS_NULLABLE]));
+  if (attendanceSettingColumnMap.get('token_salt') === 'NO') {
+    await pool.query('ALTER TABLE tenant_attendance_settings MODIFY COLUMN token_salt BINARY(32) NULL');
+  }
+  if (!attendanceSettingColumnMap.has('anti_mock_location_enabled')) {
+    await pool.query(
+      'ALTER TABLE tenant_attendance_settings ADD COLUMN anti_mock_location_enabled TINYINT(1) NOT NULL DEFAULT 0'
+    );
   }
 
   const [attendanceColumns] = await pool.execute(
@@ -242,7 +276,7 @@ async function initializeDatabase() {
   if (!existingAttendanceColumns.has('active_attendance_date')) {
     await pool.query(
       `ALTER TABLE attendance ADD COLUMN active_attendance_date DATE
-       GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN attendance_date ELSE NULL END) STORED`
+       GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN attendance_date ELSE NULL END) ${generatedColumnStorage}`
     );
   }
   const [attendanceIndexes] = await pool.execute(

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, CircleMarker, MapContainer, TileLayer, useMapEvents } from 'react-leaflet';
+import { io } from 'socket.io-client';
 import 'leaflet/dist/leaflet.css';
 import Presensi from './Presensi.jsx';
 
@@ -22,6 +23,7 @@ const NAVIGATION_TABS = [
   { id: 'workers', label: 'Data pekerja', icon: '♙' },
   { id: 'documents', label: 'Dokumen & masa berlaku', icon: '▤' },
   { id: 'attendance', label: 'Presensi', icon: '◷' },
+  { id: 'history', label: 'Riwayat aktivitas', icon: '↺', managerOnly: true },
   { id: 'settings', label: 'Pengaturan', icon: '⚙' },
 ];
 
@@ -35,6 +37,7 @@ const USER_ROLE_LABELS = {
   admin: 'Admin',
   hr_manager: 'HR Staff',
   viewer: 'Viewer',
+  worker: 'Pekerja',
 };
 
 const MAX_PROFILE_PHOTO_BYTES = 900 * 1024;
@@ -296,48 +299,155 @@ function AuthScreen({ onAuthenticated, initialError }) {
   }
 
   return (
-    <main className="auth-page">
-      <section className="auth-card">
-        <div className="brand-mark">HR</div>
-        <p className="eyebrow">MANAJEMEN HRD</p>
-        <h1>{registering ? 'Daftarkan perusahaan' : 'Selamat datang kembali'}</h1>
-        <p className="muted">
-          {registering
-            ? 'Buat ruang kerja perusahaan untuk mulai mengelola pekerja.'
-            : 'Masuk untuk memantau siklus kerja dan dokumen pekerja.'}
-        </p>
-        <form className="form-stack" onSubmit={handleSubmit}>
-          {registering && (
-            <>
-              <label>
-                Nama lengkap
-                <input className="uppercase-text" name="full_name" required minLength="2" maxLength="150" autoComplete="name" />
-              </label>
-              <label>
-                Nama perusahaan
-                <input className="uppercase-text" name="company_name" required minLength="2" maxLength="150" autoComplete="organization" />
-              </label>
-            </>
-          )}
-          <label>
-            Email
-            <input name="email" type="email" required autoComplete="email" />
-          </label>
-          <label>
-            Kata sandi
-            <input name="password" type="password" required minLength={registering ? 12 : 1} maxLength="72" autoComplete={registering ? 'new-password' : 'current-password'} />
-            {registering && <small>12 karakter atau lebih; maksimal 72 byte UTF-8.</small>}
-          </label>
-          {error && <p className="notice error" role="alert">{error}</p>}
-          {initialError && <p className="notice error" role="alert">{initialError}</p>}
-          <button className="button primary full-width" disabled={busy}>
-            {busy ? 'Memproses…' : registering ? 'Buat akun perusahaan' : 'Masuk'}
-          </button>
-        </form>
-        <button className="text-button" onClick={() => { setRegistering(!registering); setError(''); }}>
-          {registering ? 'Sudah memiliki akun? Masuk' : 'Daftarkan perusahaan baru'}
-        </button>
+    <main className="landing-page" id="home">
+      <header className="landing-navbar">
+        <a className="landing-brand" href="#home" aria-label="Ruang Kerja HRD, beranda">
+          <span className="brand-mark">HR</span>
+          <span><strong>Ruang Kerja</strong><small>HRD Management</small></span>
+        </a>
+        <nav className="landing-nav" aria-label="Navigasi utama">
+          <a className="landing-nav-home" href="#home">Home</a>
+          <a href="#features">Fitur</a>
+          <a className="landing-signin-link" href="#signin">Masuk / Sign In <span aria-hidden="true">↗</span></a>
+        </nav>
+      </header>
+
+      <section className="landing-hero">
+        <div className="landing-hero-copy">
+          <p className="landing-kicker"><span /> PLATFORM OPERASIONAL HR TERPADU</p>
+          <h1>Kelola perjalanan pekerja, <span>lebih terarah.</span></h1>
+          <p className="landing-lede">
+            Satu ruang kerja untuk memantau siklus pekerja, presensi harian, dan dokumen penting—agar tim HR dapat fokus pada hal yang paling berarti.
+          </p>
+          <div className="landing-hero-actions">
+            <a className="landing-primary-action" href="#signin">Mulai dengan masuk <span aria-hidden="true">→</span></a>
+            <a className="landing-secondary-action" href="#features">Jelajahi fitur</a>
+          </div>
+          <div className="landing-trust-note"><span aria-hidden="true">✓</span> Informasi operasional tersusun dalam satu dashboard</div>
+        </div>
+
+        <div className="landing-visual" aria-label="Ilustrasi dashboard manajemen pekerja">
+          <div className="landing-visual-orbit orbit-one" />
+          <div className="landing-visual-orbit orbit-two" />
+          <div className="landing-dashboard-card">
+            <div className="landing-dashboard-top">
+              <div><span className="landing-mini-mark">HR</span><span><strong>Ringkasan</strong><small>Ruang Kerja HRD</small></span></div>
+              <span className="landing-live"><i /> PREVIEW</span>
+            </div>
+            <p className="landing-dashboard-caption">Status pekerja</p>
+            <div className="landing-status-grid">
+              <div><span className="status-dot offered-dot" /><span>Offering</span><strong>12</strong></div>
+              <div><span className="status-dot active-dot" /><span>Aktif</span><strong>148</strong></div>
+              <div><span className="status-dot preactive-dot" /><span>Pra-aktif</span><strong>08</strong></div>
+              <div><span className="status-dot inactive-dot" /><span>Nonaktif</span><strong>06</strong></div>
+            </div>
+            <div className="landing-dashboard-bottom">
+              <div className="landing-chart" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /></div>
+              <div className="landing-chart-label"><span>Contoh tampilan</span><strong>Ringkasan HR</strong></div>
+            </div>
+          </div>
+          <div className="landing-float-card landing-doc-float"><span className="landing-float-icon">▤</span><span><strong>Dokumen terpantau</strong><small>Pengingat lebih teratur</small></span><b>✓</b></div>
+          <div className="landing-float-card landing-attendance-float"><span className="landing-float-icon attendance-float-icon">◷</span><span><strong>Presensi terkini</strong><small>Pemantauan terpusat</small></span><b className="attendance-float-check">●</b></div>
+        </div>
       </section>
+
+      <section className="landing-features" id="features">
+        <div className="landing-section-heading">
+          <p className="landing-kicker">DIBUAT UNTUK KERJA HR SEHARI-HARI</p>
+          <h2>Operasional lebih rapi, dari satu tempat.</h2>
+          <p>Alur penting tim HR terhubung agar informasi mudah dipantau dan ditindaklanjuti.</p>
+        </div>
+        <div className="landing-feature-grid">
+          <article className="landing-feature-card">
+            <span className="landing-feature-icon feature-cycle">↗</span>
+            <h3>Siklus pekerja</h3>
+            <p>Pantau progres dari offering dan pra-aktif hingga aktif maupun nonaktif.</p>
+          </article>
+          <article className="landing-feature-card">
+            <span className="landing-feature-icon feature-attendance">◷</span>
+            <h3>Real-time attendance</h3>
+            <p>Ikuti presensi melalui matriks bulanan, operasional harian, dan pusat persetujuan.</p>
+          </article>
+          <article className="landing-feature-card">
+            <span className="landing-feature-icon feature-documents">▤</span>
+            <h3>Pemantauan dokumen</h3>
+            <p>Kelola persyaratan dan masa berlaku dokumen dengan pengingat yang dapat diatur.</p>
+          </article>
+          <article className="landing-feature-card">
+            <span className="landing-feature-icon feature-security">⌁</span>
+            <h3>Presensi lebih tepercaya</h3>
+            <p>Pengaturan Anti-Mock Location membantu menambah pemeriksaan pada portal presensi.</p>
+          </article>
+          <article className="landing-feature-card">
+            <span className="landing-feature-icon feature-excel">⇅</span>
+            <h3>Impor Excel masal</h3>
+            <p>Admin dapat memproses data pekerja dari Excel langsung di browser dan meninjau duplikasi.</p>
+          </article>
+          <article className="landing-feature-card">
+            <span className="landing-feature-icon feature-roles">♙</span>
+            <h3>Akses berbasis peran</h3>
+            <p>Hak akses Admin, HR Staff, dan Viewer disesuaikan dengan tanggung jawab masing-masing.</p>
+          </article>
+        </div>
+      </section>
+
+      <section className="landing-signin-section" id="signin">
+        <div className="landing-signin-copy">
+          <p className="landing-kicker">RUANG KERJA TIM ANDA</p>
+          <h2>{registering ? 'Siapkan ruang kerja HR Anda.' : 'Selamat datang kembali.'}</h2>
+          <p>{registering
+            ? 'Daftarkan perusahaan untuk mulai mengelola informasi pekerja dan operasional HR.'
+            : 'Masuk untuk melanjutkan pemantauan siklus pekerja, presensi, dan dokumen.'}</p>
+          <div className="landing-security-note"><span aria-hidden="true">◆</span> Akses dilindungi dan dibatasi sesuai peran pengguna.</div>
+        </div>
+        <section className="auth-card landing-auth-card" aria-labelledby="landing-auth-title">
+          <div className="brand-mark">HR</div>
+          <p className="eyebrow">{registering ? 'MULAI GUNAKAN RUANG KERJA' : 'AKSES RUANG KERJA'}</p>
+          <h2 id="landing-auth-title">{registering ? 'Daftarkan perusahaan' : 'Masuk ke akun Anda'}</h2>
+          <p className="muted">
+            {registering
+              ? 'Buat ruang kerja perusahaan untuk mulai mengelola pekerja.'
+              : 'Gunakan email dan kata sandi akun Anda untuk masuk.'}
+          </p>
+          <form className="form-stack" onSubmit={handleSubmit}>
+            {registering && (
+              <>
+                <label>
+                  Nama lengkap
+                  <input className="uppercase-text" name="full_name" required minLength="2" maxLength="150" autoComplete="name" />
+                </label>
+                <label>
+                  Nama perusahaan
+                  <input className="uppercase-text" name="company_name" required minLength="2" maxLength="150" autoComplete="organization" />
+                </label>
+              </>
+            )}
+            <label>
+              Email
+              <input name="email" type="email" required autoComplete="email" />
+            </label>
+            <label>
+              Kata sandi
+              <input name="password" type="password" required minLength={registering ? 12 : 1} maxLength="72" autoComplete={registering ? 'new-password' : 'current-password'} />
+              {registering && <small>12 karakter atau lebih; maksimal 72 byte UTF-8.</small>}
+            </label>
+            {error && <p className="notice error" role="alert">{error}</p>}
+            {initialError && <p className="notice error" role="alert">{initialError}</p>}
+            <button className="button primary full-width" disabled={busy}>
+              {busy ? 'Memproses…' : registering ? 'Buat akun perusahaan' : 'Masuk'}
+            </button>
+          </form>
+          <button className="text-button" type="button" onClick={() => { setRegistering(!registering); setError(''); }}>
+            {registering ? 'Sudah memiliki akun? Masuk' : 'Daftarkan perusahaan baru'}
+          </button>
+        </section>
+      </section>
+
+      <footer className="landing-footer">
+        <a className="landing-brand" href="#home"><span className="brand-mark">HR</span><span><strong>Ruang Kerja</strong><small>HRD Management</small></span></a>
+        <span>Pengelolaan HR yang terhubung dan terarah.</span>
+        <a href="#home">Kembali ke atas ↑</a>
+      </footer>
     </main>
   );
 }
@@ -536,6 +646,7 @@ function SettingsPanel({
   attendanceSettings,
   attendanceLocations,
   onRotateAttendanceSalt,
+  onUpdateAttendanceSecurity,
   onCreateAttendanceLocation,
   onDeleteAttendanceLocation,
   error,
@@ -707,6 +818,26 @@ function SettingsPanel({
               </span>
             </div>
             <p className="muted">Salt dibuat secara acak dan disimpan hanya di backend. Nilainya tidak ditampilkan atau dikirim ke browser. Link presensi statis dibuat dari ID pekerja, salt ini, dan kunci aplikasi.</p>
+            <div className="attendance-security-setting">
+              <div>
+                <strong>Anti-Mock Location</strong>
+                <p className="muted">Memblokir sinyal mock yang dilaporkan browser, akurasi GPS yang tidak memadai, dan perpindahan yang tidak masuk akal.</p>
+              </div>
+              <label className="switch-control" aria-label="Anti-Mock Location">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={Boolean(attendanceSettings.anti_mock_location_enabled)}
+                  disabled={busy}
+                  onChange={(event) => onUpdateAttendanceSecurity(event.target.checked)}
+                />
+                <span className="switch-track" aria-hidden="true"><span /></span>
+                <span>{attendanceSettings.anti_mock_location_enabled ? 'Aktif' : 'Nonaktif'}</span>
+              </label>
+            </div>
+            <p className="attendance-salt-warning">
+              Pembatasan: halaman web tidak dapat membuktikan bahwa GPS berasal dari perangkat asli. Deteksi ini bersifat best-effort dan sinyal yang dikirim browser dapat dimanipulasi; perlindungan kuat memerlukan aplikasi native dengan device attestation.
+            </p>
             {attendanceSettings.updated_at && <p className="settings-footnote">Terakhir dirotasi: {new Date(attendanceSettings.updated_at).toLocaleString('id-ID')}</p>}
             <div className="attendance-salt-warning">
               Rotasi salt akan langsung membatalkan semua link presensi yang sudah dibagikan. Setelah rotasi, buat dan bagikan ulang tautan pekerja.
@@ -1067,10 +1198,17 @@ function WorkspaceApp() {
   const [attendancePageSize, setAttendancePageSize] = useState(25);
   const [attendancePage, setAttendancePage] = useState(1);
   const [reviewingAttendance, setReviewingAttendance] = useState(null);
-  const [attendanceSettings, setAttendanceSettings] = useState({ salt_configured: false, updated_at: null });
+  const [attendanceSettings, setAttendanceSettings] = useState({
+    salt_configured: false,
+    anti_mock_location_enabled: false,
+    updated_at: null,
+  });
   const [attendanceLocations, setAttendanceLocations] = useState([]);
   const [documentSettings, setDocumentSettings] = useState({ warning_threshold_days: 30, updated_at: null });
   const [summary, setSummary] = useState(null);
+  const [activityHistory, setActivityHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -1091,6 +1229,9 @@ function WorkspaceApp() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const workerImportInputRef = useRef(null);
+  const realtimeRefreshTimerRef = useRef(null);
+  const realtimeContextRef = useRef({ activeTab, attendanceDate, attendanceMonth });
+  realtimeContextRef.current = { activeTab, attendanceDate, attendanceMonth };
 
   useEffect(() => {
     api('/auth/me')
@@ -1113,14 +1254,118 @@ function WorkspaceApp() {
   }, [user]);
 
   useEffect(() => {
+    if (!user) return undefined;
+    const socket = io({ withCredentials: true });
+    let mounted = true;
+    let reconnectTimer;
+    const scheduleSync = () => {
+      if (realtimeRefreshTimerRef.current) window.clearTimeout(realtimeRefreshTimerRef.current);
+      realtimeRefreshTimerRef.current = window.setTimeout(async () => {
+        try {
+          const refreshTasks = [refreshDashboard(), refreshWorkers()];
+          const current = realtimeContextRef.current;
+          if (current.activeTab === 'attendance') {
+            refreshTasks.push(
+              api(`/attendance?date=${encodeURIComponent(current.attendanceDate)}`).then((data) => {
+                setAttendanceData(data);
+                setAttendanceSettings((settings) => ({ ...settings, salt_configured: data.salt_configured }));
+              }),
+              api(`/attendance/month?month=${encodeURIComponent(current.attendanceMonth)}`).then(setMonthlyAttendance)
+            );
+          }
+          if (current.activeTab === 'settings' && user.role === 'admin') {
+            refreshTasks.push(
+              refreshDocumentTypes(),
+              api('/admin/attendance-settings').then(setAttendanceSettings),
+              api('/admin/attendance-locations').then(setAttendanceLocations),
+              api('/admin/document-settings').then(setDocumentSettings)
+            );
+          }
+          if (current.activeTab === 'history' && ['admin', 'hr_manager'].includes(user.role)) {
+            refreshTasks.push(api('/history?limit=100').then(setActivityHistory));
+          }
+          await Promise.all(refreshTasks);
+        } catch (requestError) {
+          if (mounted) showError(requestError);
+        }
+      }, 100);
+    };
+    const setConnected = () => {
+      setRealtimeConnected(true);
+      scheduleSync();
+    };
+    const setDisconnected = (reason) => {
+      setRealtimeConnected(false);
+      if (reason === 'io server disconnect') {
+        reconnectTimer = window.setTimeout(() => {
+          if (mounted) socket.connect();
+        }, 1000);
+      }
+    };
+    const eventNames = [
+      'worker_changed',
+      'attendance_updated',
+      'approval_updated',
+      'documents_updated',
+      'dashboard_updated',
+      'settings_updated',
+      'user_changed',
+      'history_updated',
+    ];
+    socket.on('connect', setConnected);
+    socket.on('disconnect', setDisconnected);
+    socket.on('connect_error', setDisconnected);
+    eventNames.forEach((eventName) => socket.on(eventName, scheduleSync));
+    return () => {
+      mounted = false;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      if (realtimeRefreshTimerRef.current) window.clearTimeout(realtimeRefreshTimerRef.current);
+      socket.disconnect();
+      setRealtimeConnected(false);
+    };
+  }, [user]);
+
+  useEffect(() => {
     window.localStorage.setItem('hrd-app-theme', theme);
   }, [theme]);
 
   useEffect(() => {
     if (!user || activeTab !== 'overview') return undefined;
-    const refreshMetrics = () => refreshDashboard().catch(showError);
+    const refreshMetrics = () => {
+      if (document.visibilityState === 'visible') refreshDashboard().catch(showError);
+    };
+    document.addEventListener('visibilitychange', refreshMetrics);
+    window.addEventListener('focus', refreshMetrics);
     const intervalId = window.setInterval(refreshMetrics, 15000);
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshMetrics);
+      window.removeEventListener('focus', refreshMetrics);
+    };
+  }, [activeTab, user]);
+
+  useEffect(() => {
+    if (!user || !['admin', 'hr_manager'].includes(user.role) || activeTab !== 'history') return undefined;
+    let cancelled = false;
+    const refreshHistory = async () => {
+      setHistoryLoading(true);
+      try {
+        const rows = await api('/history?limit=100');
+        if (!cancelled) setActivityHistory(rows);
+      } catch (requestError) {
+        if (!cancelled) showError(requestError);
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    };
+    refreshHistory();
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refreshHistory();
+    }, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, [activeTab, user]);
 
   useEffect(() => {
@@ -1223,6 +1468,24 @@ function WorkspaceApp() {
     } catch (requestError) {
       showError(requestError);
       return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateAttendanceSecurity(antiMockLocationEnabled) {
+    setError('');
+    setNotice('');
+    setBusy(true);
+    try {
+      const settings = await api('/admin/attendance-settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ anti_mock_location_enabled: antiMockLocationEnabled }),
+      });
+      setAttendanceSettings(settings);
+      setNotice(`Anti-Mock Location ${settings.anti_mock_location_enabled ? 'diaktifkan' : 'dinonaktifkan'}.`);
+    } catch (requestError) {
+      showError(requestError);
     } finally {
       setBusy(false);
     }
@@ -1348,7 +1611,7 @@ function WorkspaceApp() {
   }
 
   function handleTabKeyDown(event) {
-    const navigationTabs = NAVIGATION_TABS;
+    const navigationTabs = NAVIGATION_TABS.filter((tab) => !tab.managerOnly || user?.role !== 'viewer');
     const currentIndex = navigationTabs.findIndex((tab) => tab.id === activeTab);
     let nextIndex = currentIndex;
     if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % navigationTabs.length;
@@ -1972,6 +2235,7 @@ function WorkspaceApp() {
     attendancePage * attendancePageSize
   );
   const monthlyDays = Array.from({ length: monthlyAttendance.days_in_month }, (_, index) => index + 1);
+  const navigationTabs = NAVIGATION_TABS.filter((tab) => !tab.managerOnly || user?.role !== 'viewer');
 
   function selectMatrixAttendanceDate(day) {
     const date = `${attendanceMonth}-${String(day).padStart(2, '0')}`;
@@ -2016,7 +2280,7 @@ function WorkspaceApp() {
           <strong className="uppercase-text">{user.company_name}</strong>
         </div>
         <nav className="side-nav" role="tablist" aria-label="Navigasi utama" onKeyDown={handleTabKeyDown}>
-          {NAVIGATION_TABS.map((tab) => (
+          {navigationTabs.map((tab) => (
             <button
               className={`nav-link ${activeTab === tab.id ? 'active' : ''}`}
               id={`tab-${tab.id}`}
@@ -2050,6 +2314,9 @@ function WorkspaceApp() {
             <p className="muted">Kelola status dan persyaratan dokumen dalam satu ruang kerja.</p>
           </div>
           <div className="topbar-actions">
+            <span className={`realtime-status ${realtimeConnected ? 'connected' : ''}`} role="status">
+              <i /> {realtimeConnected ? 'Live' : 'Menghubungkan'}
+            </span>
             {user.role !== 'viewer' && (
               <button className="button primary add-worker-button" type="button" onClick={openWorkerModal}>
                 <span aria-hidden="true">+</span> Tambah Pekerja
@@ -2101,6 +2368,46 @@ function WorkspaceApp() {
             <StatCard label="Dokumen perlu tindak lanjut" value={summary?.expiring_documents ?? '—'} tone="amber" />
             <StatCard label="Klaim presensi pending" value={summary?.pending_attendance_claims ?? '—'} tone="rose" />
           </div>
+        </section>
+
+        <section
+          className="history-page"
+          id="panel-history"
+          role="tabpanel"
+          aria-labelledby="tab-history"
+          hidden={activeTab !== 'history'}
+        >
+          <div className="overview-heading">
+            <div><p className="eyebrow">AUDIT TRAIL</p><h2>Riwayat aktivitas</h2></div>
+            <span className="overview-live"><i /> Diperbarui otomatis</span>
+          </div>
+          <section className="panel history-panel" aria-label="Daftar aktivitas pengguna">
+            {historyLoading && !activityHistory.length ? (
+              <p className="muted history-state">Memuat riwayat aktivitas…</p>
+            ) : activityHistory.length ? (
+              <ol className="history-list">
+                {activityHistory.map((event) => (
+                  <li className="history-item" key={event.id}>
+                    <span className={`history-action action-${event.action}`}>
+                      {{ create: 'Create', update: 'Update', delete: 'Delete', approve: 'Approve', reject: 'Reject' }[event.action] || event.action}
+                    </span>
+                    <div className="history-event-content">
+                      <div className="history-event-heading">
+                        <strong>{event.actor_name}</strong>
+                        <span className="history-role">{USER_ROLE_LABELS[event.actor_role] || 'Sistem'}</span>
+                        <time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString('id-ID')}</time>
+                      </div>
+                      <p>{event.description}</p>
+                      <small>{event.entity_type.replaceAll('_', ' ')}{event.entity_id ? ` · ${event.entity_id}` : ''}</small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="muted history-state">Belum ada aktivitas yang tercatat.</p>
+            )}
+            <p className="history-footnote">Menampilkan hingga 100 aktivitas terbaru pada perusahaan ini. Riwayat hanya dapat dilihat oleh Admin dan HR Staff.</p>
+          </section>
         </section>
 
         <section
@@ -2751,6 +3058,7 @@ function WorkspaceApp() {
           onUpdateUser={handleUpdateUser}
           onResetPassword={handleResetPassword}
           attendanceSettings={attendanceSettings}
+          onUpdateAttendanceSecurity={updateAttendanceSecurity}
           attendanceLocations={attendanceLocations}
           onRotateAttendanceSalt={rotateAttendanceSalt}
           onCreateAttendanceLocation={createAttendanceLocation}

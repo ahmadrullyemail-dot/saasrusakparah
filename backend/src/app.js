@@ -1,15 +1,18 @@
 require('dotenv').config();
 
 const crypto = require('node:crypto');
+const http = require('node:http');
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const { Server } = require('socket.io');
 const { pool, initializeDatabase } = require('./db');
 
 const app = express();
+let realtimeServer;
 const PORT = Number(process.env.PORT || 4000);
 const COOKIE_NAME = 'hrd_session';
 const MAX_PROFILE_PHOTO_BYTES = 900 * 1024;
@@ -127,6 +130,24 @@ function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
 
+async function recordAudit(req, { action, entityType, entityId = null, description }, connection = pool) {
+  await connection.execute(
+    `INSERT INTO audit_events
+       (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      req.auth.tenantId,
+      req.auth.userId,
+      req.auth.fullName || req.auth.email,
+      req.auth.role,
+      action,
+      entityType,
+      entityId == null ? null : String(entityId),
+      String(description).slice(0, 1000),
+    ]
+  );
+}
+
 function requireAuth(req, res, next) {
   try {
     const token = req.cookies[COOKIE_NAME];
@@ -225,6 +246,12 @@ function attendanceMonthRange(value) {
 function validWorkerId(value) {
   if (typeof value !== 'string' || !/^[1-9]\d{0,19}$/.test(value)) return false;
   return BigInt(value) <= 18446744073709551615n;
+}
+
+function implausibleLocationMovement(distanceMeters, elapsedSeconds) {
+  return Number.isFinite(distanceMeters) && Number.isFinite(elapsedSeconds)
+    && elapsedSeconds > 0 && elapsedSeconds <= 24 * 60 * 60
+    && distanceMeters / elapsedSeconds > 300;
 }
 
 function validCoordinates(latitude, longitude) {
@@ -425,6 +452,7 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
   const [rows] = await pool.execute(
     `SELECT w.id AS worker_id, w.tenant_id, w.full_name, w.position, t.name AS company_name,
             s.token_salt, l.token_hash,
+            s.anti_mock_location_enabled,
             DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS attendance_date,
             a.status, a.attendance_type, a.approval_status, a.approval_note,
             a.check_in_time, a.check_out_time, a.location_id,
@@ -480,6 +508,7 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
       worker_id: String(attendanceData.worker_id),
       location_id: attendanceData.location_id == null ? null : String(attendanceData.location_id),
       has_evidence: Boolean(attendanceData.has_evidence),
+      anti_mock_location_enabled: Boolean(attendanceData.anti_mock_location_enabled),
       locations,
       recent_attendance: historyRows,
     },
@@ -493,6 +522,9 @@ app.post('/api/public/attendance', attendanceEvidenceUpload.single('evidence'), 
     action,
     latitude,
     longitude,
+    is_mocked: isMockedInput,
+    location_accuracy: accuracyInput,
+    location_speed: speedInput,
     request_type: requestType,
   } = req.body || {};
   const parsedLatitude = typeof latitude === 'number' ? latitude : latitude == null || String(latitude).trim() === '' ? NaN : Number(latitude);
@@ -530,7 +562,7 @@ app.post('/api/public/attendance', attendanceEvidenceUpload.single('evidence'), 
   try {
     await connection.beginTransaction();
     const [workers] = await connection.execute(
-      `SELECT w.id AS worker_id, w.tenant_id, s.token_salt, l.token_hash
+      `SELECT w.id AS worker_id, w.tenant_id, w.full_name, s.token_salt, s.anti_mock_location_enabled, l.token_hash
          FROM workers w
          JOIN tenant_attendance_settings s ON s.tenant_id = w.tenant_id
          JOIN worker_attendance_links l ON w.id = l.worker_id AND w.tenant_id = l.tenant_id
@@ -546,6 +578,57 @@ app.post('/api/public/attendance', attendanceEvidenceUpload.single('evidence'), 
     )) {
       await connection.rollback();
       return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+    }
+
+    if (worker.anti_mock_location_enabled) {
+      const parsedIsMocked = isMockedInput === true || isMockedInput === 'true'
+        ? true
+        : isMockedInput === false || isMockedInput === 'false'
+          ? false
+          : null;
+      const accuracy = accuracyInput == null || String(accuracyInput).trim() === '' ? NaN : Number(accuracyInput);
+      const speed = speedInput == null || String(speedInput).trim() === '' ? null : Number(speedInput);
+      if (parsedIsMocked === null || !Number.isFinite(accuracy) || accuracy <= 0 || accuracy > 1000
+        || (speed !== null && (!Number.isFinite(speed) || speed < 0))) {
+        await connection.rollback();
+        return res.status(403).json({
+          error: 'Anti-Mock Location is enabled. A valid device location signal is required; enable precise location and try again.',
+        });
+      }
+      if (parsedIsMocked || (speed !== null && speed > 300)) {
+        await connection.rollback();
+        return res.status(403).json({
+          error: 'Attendance was blocked because the device reported a mocked or implausible location.',
+        });
+      }
+      const [previousLocations] = await connection.execute(
+        `SELECT latitude, longitude,
+                TIMESTAMPDIFF(SECOND, recorded_at, CURRENT_TIMESTAMP) AS elapsed_seconds
+           FROM (
+             SELECT check_in_latitude AS latitude, check_in_longitude AS longitude, check_in_time AS recorded_at
+               FROM attendance
+              WHERE tenant_id = ? AND worker_id = ? AND deleted_at IS NULL
+                AND check_in_time IS NOT NULL AND check_in_latitude IS NOT NULL AND check_in_longitude IS NOT NULL
+             UNION ALL
+             SELECT check_out_latitude AS latitude, check_out_longitude AS longitude, check_out_time AS recorded_at
+               FROM attendance
+              WHERE tenant_id = ? AND worker_id = ? AND deleted_at IS NULL
+                AND check_out_time IS NOT NULL AND check_out_latitude IS NOT NULL AND check_out_longitude IS NOT NULL
+           ) AS recorded_locations
+          WHERE recorded_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY)
+          ORDER BY recorded_at DESC LIMIT 1`,
+        [worker.tenant_id, worker.worker_id, worker.tenant_id, worker.worker_id]
+      );
+      const previous = previousLocations[0];
+      if (previous && implausibleLocationMovement(
+        distanceInMeters(Number(previous.latitude), Number(previous.longitude), parsedLatitude, parsedLongitude),
+        Number(previous.elapsed_seconds)
+      )) {
+        await connection.rollback();
+        return res.status(403).json({
+          error: 'Attendance was blocked because the reported movement is not physically plausible.',
+        });
+      }
     }
 
     const [records] = await connection.execute(
@@ -701,7 +784,35 @@ app.post('/api/public/attendance', attendanceEvidenceUpload.single('evidence'), 
          FROM attendance WHERE tenant_id = ? AND worker_id = ? AND attendance_date = CURDATE() AND deleted_at IS NULL`,
       [worker.tenant_id, worker.worker_id]
     );
+    const auditDescription = action === 'request_status'
+      ? `Pengajuan presensi ${requestType} diajukan oleh pekerja "${worker.full_name}".`
+      : `Pekerja "${worker.full_name}" melakukan ${action === 'check_in' ? 'Check-In' : 'Check-Out'}${isDinas ? ' Dinas' : ''}.`;
+    await connection.execute(
+      `INSERT INTO audit_events
+         (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
+       VALUES (?, NULL, ?, 'worker', ?, ?, ?, ?)`,
+      [
+        worker.tenant_id,
+        worker.full_name,
+        action === 'check_out' ? 'update' : 'create',
+        action === 'request_status' ? 'attendance_claim' : 'attendance',
+        String(worker.worker_id),
+        auditDescription,
+      ]
+    );
     await connection.commit();
+    publishTenantEvent(worker.tenant_id, 'attendance_updated', {
+      action,
+      worker_id: String(worker.worker_id),
+    });
+    publishTenantEvent(worker.tenant_id, 'dashboard_updated', { action });
+    if (action === 'request_status' || isDinas) {
+      publishTenantEvent(worker.tenant_id, 'approval_updated', {
+        action,
+        worker_id: String(worker.worker_id),
+      });
+    }
+    publishTenantEvent(worker.tenant_id, 'history_updated', { action });
     res.json({
       data: {
         ...updatedRows[0],
@@ -839,15 +950,102 @@ app.get('/api/auth/me', requireAuth, asyncRoute(async (req, res) => {
 
 app.use('/api', requireAuth);
 
+function publishTenantEvent(tenantId, event, payload = {}) {
+  if (!realtimeServer || !tenantId) return;
+  realtimeServer.to(`tenant:${tenantId}`).emit(event, {
+    ...payload,
+    occurred_at: new Date().toISOString(),
+  });
+}
+
+app.use('/api', (req, res, next) => {
+  if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) return next();
+  res.once('finish', () => {
+    if (res.statusCode < 200 || res.statusCode >= 300 || !req.auth) return;
+    const path = req.originalUrl.split('?')[0];
+    const payload = { action: req.method.toLowerCase() };
+    if (path.startsWith('/api/workers') || path.startsWith('/api/admin/workers')) {
+      publishTenantEvent(req.auth.tenantId, 'worker_changed', payload);
+      publishTenantEvent(req.auth.tenantId, 'dashboard_updated', payload);
+      if (path.includes('/documents')) publishTenantEvent(req.auth.tenantId, 'documents_updated', payload);
+      if (path.includes('/attendance-link')) publishTenantEvent(req.auth.tenantId, 'attendance_updated', payload);
+    } else if (path.startsWith('/api/attendance')) {
+      publishTenantEvent(req.auth.tenantId, 'attendance_updated', payload);
+      publishTenantEvent(req.auth.tenantId, 'dashboard_updated', payload);
+      if (path.includes('/approval')) publishTenantEvent(req.auth.tenantId, 'approval_updated', payload);
+    } else if (path.startsWith('/api/admin/document')) {
+      publishTenantEvent(req.auth.tenantId, 'documents_updated', payload);
+      publishTenantEvent(req.auth.tenantId, 'dashboard_updated', payload);
+      publishTenantEvent(req.auth.tenantId, 'settings_updated', payload);
+    } else if (path.startsWith('/api/admin/users')) {
+      publishTenantEvent(req.auth.tenantId, 'user_changed', payload);
+    } else if (path.startsWith('/api/admin/attendance')) {
+      publishTenantEvent(req.auth.tenantId, 'settings_updated', payload);
+    }
+    publishTenantEvent(req.auth.tenantId, 'history_updated', payload);
+  });
+  next();
+});
+
+app.get('/api/history', requireManager, asyncRoute(async (req, res) => {
+  const requestedLimit = Number(req.query.limit || 100);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 200) : 100;
+  const [rows] = await pool.execute(
+    `SELECT id, user_id, actor_name, actor_role, action, entity_type, entity_id, description, created_at
+       FROM audit_events
+      WHERE tenant_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?`,
+    [req.auth.tenantId, limit]
+  );
+  res.json({
+    data: rows.map((row) => ({ ...row, id: String(row.id) })),
+  });
+}));
+
 app.get('/api/admin/attendance-settings', requireAdmin, asyncRoute(async (req, res) => {
   const [rows] = await pool.execute(
-    `SELECT updated_at FROM tenant_attendance_settings WHERE tenant_id = ?`,
+    `SELECT token_salt IS NOT NULL AS salt_configured,
+            anti_mock_location_enabled, updated_at
+       FROM tenant_attendance_settings WHERE tenant_id = ?`,
     [req.auth.tenantId]
   );
   res.json({
     data: {
-      salt_configured: Boolean(rows[0]),
+      salt_configured: Boolean(rows[0]?.salt_configured),
+      anti_mock_location_enabled: Boolean(rows[0]?.anti_mock_location_enabled),
       updated_at: rows[0]?.updated_at || null,
+    },
+  });
+}));
+
+app.patch('/api/admin/attendance-settings', requireAdmin, asyncRoute(async (req, res) => {
+  const { anti_mock_location_enabled: enabled } = req.body || {};
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'anti_mock_location_enabled must be a boolean' });
+  }
+  await pool.execute(
+    `INSERT INTO tenant_attendance_settings (tenant_id, anti_mock_location_enabled)
+     VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE anti_mock_location_enabled = VALUES(anti_mock_location_enabled)`,
+    [req.auth.tenantId, enabled ? 1 : 0]
+  );
+  await recordAudit(req, {
+    action: 'update',
+    entityType: 'attendance_settings',
+    description: `Anti-Mock Location ${enabled ? 'diaktifkan' : 'dinonaktifkan'}.`,
+  });
+  const [rows] = await pool.execute(
+    `SELECT token_salt IS NOT NULL AS salt_configured,
+            anti_mock_location_enabled, updated_at
+       FROM tenant_attendance_settings WHERE tenant_id = ?`,
+    [req.auth.tenantId]
+  );
+  res.json({
+    data: {
+      salt_configured: Boolean(rows[0].salt_configured),
+      anti_mock_location_enabled: Boolean(rows[0].anti_mock_location_enabled),
+      updated_at: rows[0].updated_at,
     },
   });
 }));
@@ -893,6 +1091,12 @@ app.post('/api/admin/attendance-locations', requireAdmin, asyncRoute(async (req,
       JSON.stringify(allowedActivities),
     ]
   );
+  await recordAudit(req, {
+    action: 'create',
+    entityType: 'attendance_location',
+    entityId: result.insertId,
+    description: `Lokasi geofence "${name}" ditambahkan dengan radius ${input.radius_meters} m.`,
+  });
   res.status(201).json({
     data: {
       id: String(result.insertId),
@@ -912,6 +1116,12 @@ app.delete('/api/admin/attendance-locations/:id', requireAdmin, asyncRoute(async
     [req.params.id, req.auth.tenantId]
   );
   if (!result.affectedRows) return res.status(404).json({ error: 'Attendance location not found' });
+  await recordAudit(req, {
+    action: 'delete',
+    entityType: 'attendance_location',
+    entityId: req.params.id,
+    description: 'Lokasi geofence dihapus.',
+  });
   res.status(204).end();
 }));
 
@@ -923,6 +1133,7 @@ app.post('/api/admin/attendance-settings/salt', requireAdmin, asyncRoute(async (
   const salt = crypto.randomBytes(32);
   const connection = await pool.getConnection();
   let updatedAt;
+  let antiMockLocationEnabled;
   try {
     await connection.beginTransaction();
     await connection.execute(
@@ -937,10 +1148,16 @@ app.post('/api/admin/attendance-settings/salt', requireAdmin, asyncRoute(async (
       [req.auth.tenantId]
     );
     const [rows] = await connection.execute(
-      'SELECT updated_at FROM tenant_attendance_settings WHERE tenant_id = ?',
+      'SELECT updated_at, anti_mock_location_enabled FROM tenant_attendance_settings WHERE tenant_id = ?',
       [req.auth.tenantId]
     );
     updatedAt = rows[0].updated_at;
+    antiMockLocationEnabled = Boolean(rows[0].anti_mock_location_enabled);
+    await recordAudit(req, {
+      action: 'update',
+      entityType: 'attendance_settings',
+      description: 'Salt perusahaan dibuat atau dirotasi; tautan presensi aktif dicabut.',
+    }, connection);
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -951,6 +1168,7 @@ app.post('/api/admin/attendance-settings/salt', requireAdmin, asyncRoute(async (
   res.json({
     data: {
       salt_configured: true,
+      anti_mock_location_enabled: antiMockLocationEnabled,
       updated_at: updatedAt,
     },
   });
@@ -989,6 +1207,12 @@ app.post('/api/admin/document-types', requireAdmin, asyncRoute(async (req, res) 
      VALUES (?, ?, ?, ?)`,
     [req.auth.tenantId, code, normalizedName, hashNormalizedText(normalizedName)]
   );
+  await recordAudit(req, {
+    action: 'create',
+    entityType: 'document_type',
+    entityId: code,
+    description: `Jenis dokumen "${normalizedName}" ditambahkan.`,
+  });
   res.status(201).json({
     data: {
       id: String(result.insertId),
@@ -1027,11 +1251,27 @@ app.patch('/api/admin/document-types/:code', requireAdmin, asyncRoute(async (req
     assignments.push('warning_threshold_days = ?');
     values.push(warningThresholdDays);
   }
+  const [existingType] = await pool.execute(
+    'SELECT code FROM document_types WHERE tenant_id = ? AND code = ?',
+    [req.auth.tenantId, req.params.code]
+  );
+  if (!existingType[0]) return res.status(404).json({ error: 'Document type not found' });
   values.push(req.auth.tenantId, req.params.code);
   await pool.execute(
     `UPDATE document_types SET ${assignments.join(', ')} WHERE tenant_id = ? AND code = ?`,
     values
   );
+  const changedFields = [
+    updatesName ? 'nama' : null,
+    updatesStatus ? 'status aktif' : null,
+    updatesWarningThreshold ? 'ambang peringatan' : null,
+  ].filter(Boolean);
+  await recordAudit(req, {
+    action: 'update',
+    entityType: 'document_type',
+    entityId: req.params.code,
+    description: `Jenis dokumen diperbarui (${changedFields.join(', ')}).`,
+  });
   const [rows] = await pool.execute(
     `SELECT id, code, name, is_active, is_builtin, warning_threshold_days, created_at
        FROM document_types WHERE tenant_id = ? AND code = ?`,
@@ -1060,6 +1300,12 @@ app.patch('/api/profile', asyncRoute(async (req, res) => {
       WHERE id = ? AND tenant_id = ? AND is_active = 1`,
     [normalizedName, req.auth.userId, req.auth.tenantId]
   );
+  await recordAudit(req, {
+    action: 'update',
+    entityType: 'user_profile',
+    entityId: req.auth.userId,
+    description: 'Nama profil akun diperbarui.',
+  });
   res.json({
     data: {
       id: req.auth.userId,
@@ -1102,6 +1348,12 @@ app.post('/api/profile/photo', profilePhotoUpload.single('photo'), asyncRoute(as
       WHERE id = ? AND tenant_id = ? AND is_active = 1`,
     [req.file.buffer, mimeType, req.auth.userId, req.auth.tenantId]
   );
+  await recordAudit(req, {
+    action: 'update',
+    entityType: 'user_profile',
+    entityId: req.auth.userId,
+    description: 'Foto profil akun diperbarui.',
+  });
   res.json({
     data: {
       id: req.auth.userId,
@@ -1140,6 +1392,12 @@ app.patch('/api/profile/password', asyncRoute(async (req, res) => {
         WHERE id = ? AND tenant_id = ?`,
       [passwordHash, tokenVersion, req.auth.userId, req.auth.tenantId]
     );
+    await recordAudit(req, {
+      action: 'update',
+      entityType: 'user_security',
+      entityId: req.auth.userId,
+      description: 'Kata sandi akun diubah; sesi lain dicabut.',
+    }, connection);
     await connection.commit();
     createSessionCookie(res, {
       id: req.auth.userId,
@@ -1186,6 +1444,12 @@ app.post('/api/admin/users', requireAdmin, asyncRoute(async (req, res) => {
       role,
     ]
   );
+  await recordAudit(req, {
+    action: 'create',
+    entityType: 'user',
+    entityId: result.insertId,
+    description: `Akun pengguna "${normalizeText(full_name)}" ditambahkan dengan role ${role}.`,
+  });
   res.status(201).json({
     data: {
       id: String(result.insertId),
@@ -1245,6 +1509,12 @@ app.patch('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
         WHERE id = ? AND tenant_id = ?`,
       [nextRole, nextActive ? 1 : 0, req.params.id, req.auth.tenantId]
     );
+    await recordAudit(req, {
+      action: 'update',
+      entityType: 'user',
+      entityId: req.params.id,
+      description: `Akun pengguna diperbarui: ${updatesRole ? `role ${target.role} menjadi ${nextRole}` : ''}${updatesRole && updatesStatus ? '; ' : ''}${updatesStatus ? `status ${nextActive ? 'aktif' : 'nonaktif'}` : ''}.`,
+    }, connection);
     await connection.commit();
     res.json({
       data: {
@@ -1273,9 +1543,15 @@ app.post('/api/admin/users/:id/reset-password', requireAdmin, asyncRoute(async (
   const [result] = await pool.execute(
     `UPDATE users SET password_hash = ?, token_version = token_version + 1
       WHERE id = ? AND tenant_id = ?`,
-    [passwordHash, req.params.id, req.auth.tenantId]
+    [passwordHash, req.params.id, req.auth.tenantId    ]
   );
   if (!result.affectedRows) return res.status(404).json({ error: 'User not found' });
+  await recordAudit(req, {
+    action: 'update',
+    entityType: 'user',
+    entityId: req.params.id,
+    description: 'Kata sandi akun pengguna direset; sesi aktif dicabut.',
+  });
   res.json({ data: { message: 'Password reset. The user must sign in again.' } });
 }));
 
@@ -1347,6 +1623,11 @@ app.patch('/api/admin/document-settings', requireAdmin, asyncRoute(async (req, r
      ON DUPLICATE KEY UPDATE warning_threshold_days = VALUES(warning_threshold_days)`,
     [req.auth.tenantId, warningThresholdDays]
   );
+  await recordAudit(req, {
+    action: 'update',
+    entityType: 'document_settings',
+    description: `Ambang peringatan dokumen perusahaan diatur menjadi ${warningThresholdDays} hari.`,
+  });
   const [rows] = await pool.execute(
     `SELECT warning_threshold_days, updated_at
        FROM tenant_document_settings
@@ -1363,7 +1644,7 @@ app.get('/api/attendance', asyncRoute(async (req, res) => {
   }
   const [dateRows] = await pool.execute(
     `SELECT DATE_FORMAT(COALESCE(?, CURDATE()), '%Y-%m-%d') AS attendance_date,
-            EXISTS(SELECT 1 FROM tenant_attendance_settings WHERE tenant_id = ?) AS salt_configured`,
+            EXISTS(SELECT 1 FROM tenant_attendance_settings WHERE tenant_id = ? AND token_salt IS NOT NULL) AS salt_configured`,
     [requestedDate, req.auth.tenantId]
   );
   const attendanceDate = dateRows[0].attendance_date;
@@ -1476,6 +1757,12 @@ app.patch('/api/attendance/:workerId/status', requireAdmin, asyncRoute(async (re
         [req.auth.tenantId, req.params.workerId, attendance_date, status, status]
       );
     }
+    await recordAudit(req, {
+      action: 'update',
+      entityType: 'attendance',
+      entityId: `${req.params.workerId}:${attendance_date}`,
+      description: `Status presensi untuk ${attendance_date} diubah menjadi ${status}.`,
+    }, connection);
     await connection.commit();
     res.json({ data: { worker_id: String(req.params.workerId), attendance_date, status } });
   } catch (error) {
@@ -1509,6 +1796,12 @@ app.patch('/api/attendance/:workerId/approval', requireAdmin, asyncRoute(async (
     ]
   );
   if (!result.affectedRows) return res.status(409).json({ error: 'No pending attendance request was found for this worker and date' });
+  await recordAudit(req, {
+    action: decision === 'approve' ? 'approve' : 'reject',
+    entityType: 'attendance_claim',
+    entityId: `${req.params.workerId}:${attendanceDate}`,
+    description: `Klaim presensi tanggal ${attendanceDate} ${decision === 'approve' ? 'disetujui' : 'ditolak'}.`,
+  });
   res.json({
     data: {
       worker_id: String(req.params.workerId),
@@ -1553,6 +1846,12 @@ app.delete('/api/attendance/:workerId', requireAdmin, asyncRoute(async (req, res
     [req.auth.tenantId, req.params.workerId, attendanceDate]
   );
   if (!result.affectedRows) return res.status(404).json({ error: 'Attendance record not found' });
+  await recordAudit(req, {
+    action: 'delete',
+    entityType: 'attendance',
+    entityId: `${req.params.workerId}:${attendanceDate}`,
+    description: `Catatan presensi tanggal ${attendanceDate} diarsipkan.`,
+  });
   res.status(204).end();
 }));
 
@@ -1590,7 +1889,7 @@ app.post('/api/workers/:id/attendance-link', requireManager, asyncRoute(async (r
       'SELECT token_salt FROM tenant_attendance_settings WHERE tenant_id = ?',
       [req.auth.tenantId]
     );
-    if (!settings[0]) {
+    if (!settings[0]?.token_salt) {
       await connection.rollback();
       return res.status(409).json({ error: 'Configure the company attendance salt in Settings first' });
     }
@@ -1602,6 +1901,12 @@ app.post('/api/workers/:id/attendance-link', requireManager, asyncRoute(async (r
        ON DUPLICATE KEY UPDATE token_hash = VALUES(token_hash), revoked_at = NULL, updated_at = CURRENT_TIMESTAMP`,
       [req.auth.tenantId, worker.id, hashAttendanceToken(token)]
     );
+    await recordAudit(req, {
+      action: 'create',
+      entityType: 'attendance_link',
+      entityId: worker.id,
+      description: `Tautan presensi untuk pekerja "${worker.full_name}" dibuat atau diaktifkan kembali.`,
+    }, connection);
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -1619,6 +1924,12 @@ app.delete('/api/workers/:id/attendance-link', requireAdmin, asyncRoute(async (r
     [req.auth.tenantId, req.params.id]
   );
   if (!result.affectedRows) return res.status(404).json({ error: 'Active attendance link not found' });
+  await recordAudit(req, {
+    action: 'delete',
+    entityType: 'attendance_link',
+    entityId: req.params.id,
+    description: 'Tautan presensi pekerja dicabut.',
+  });
   res.status(204).end();
 }));
 
@@ -1709,6 +2020,12 @@ app.post('/api/workers', requireManager, asyncRoute(async (req, res) => {
        VALUES (?, ?, ?, NULL, 'offered')`,
       [req.auth.tenantId, workerId, req.auth.userId]
     );
+    await recordAudit(req, {
+      action: 'create',
+      entityType: 'worker',
+      entityId: workerId,
+      description: `Pekerja "${normalizeText(full_name)}" ditambahkan dengan status Offering.`,
+    }, connection);
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -1829,6 +2146,13 @@ app.post('/api/admin/workers/import', requireAdmin, asyncRoute(async (req, res) 
   } finally {
     connection.release();
   }
+  if (created.length) {
+    await recordAudit(req, {
+      action: 'create',
+      entityType: 'worker_import',
+      description: `Impor pekerja selesai: ${created.length} ditambahkan, ${skipped.length} dilewati, ${errors.length} baris bermasalah.`,
+    });
+  }
   res.status(201).json({ data: { created, skipped, errors } });
 }));
 
@@ -1918,16 +2242,26 @@ app.patch('/api/workers/:id', requireAdmin, asyncRoute(async (req, res) => {
       assignments.push(`\`${key}\` = ?`);
       values.push(normalize(body[key]));
     }
-    if (updatesRequiredDocuments) {
-      assignments.push('required_document_types = ?');
-      values.push(JSON.stringify(body.required_document_types));
-    }
+  }
+  if (updatesRequiredDocuments) {
+    assignments.push('required_document_types = ?');
+    values.push(JSON.stringify(body.required_document_types));
   }
   values.push(worker.id, req.auth.tenantId);
   await pool.execute(
     `UPDATE workers SET ${assignments.join(', ')} WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
     values
   );
+  const changedFields = [
+    ...updates.map(([key]) => key),
+    ...(updatesRequiredDocuments ? ['required_document_types'] : []),
+  ];
+  await recordAudit(req, {
+    action: 'update',
+    entityType: 'worker',
+    entityId: worker.id,
+    description: `Data pekerja "${worker.full_name}" diperbarui (${changedFields.join(', ')}).`,
+  });
   const updated = await getWorker(req.auth.tenantId, worker.id);
   const documents = await listWorkerDocuments(req.auth.tenantId, worker.id);
   res.json({
@@ -1958,6 +2292,16 @@ app.delete('/api/workers/:id', requireAdmin, asyncRoute(async (req, res) => {
         WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
       [req.auth.tenantId, req.params.id]
     );
+    const [workers] = await connection.execute(
+      'SELECT full_name FROM workers WHERE id = ? AND tenant_id = ?',
+      [req.params.id, req.auth.tenantId]
+    );
+    await recordAudit(req, {
+      action: 'delete',
+      entityType: 'worker',
+      entityId: req.params.id,
+      description: `Data pekerja "${workers[0]?.full_name || req.params.id}" diarsipkan.`,
+    }, connection);
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -2007,6 +2351,12 @@ app.post('/api/workers/:id/documents', requireManager, asyncRoute(async (req, re
     [result.insertId, req.auth.tenantId]
   );
   const document = rows[0];
+  await recordAudit(req, {
+  action: 'create',
+  entityType: 'document',
+  entityId: result.insertId,
+  description: `Dokumen ${type} untuk pekerja "${worker.full_name}" dicatat dengan status ${status}.`,
+  });
   res.status(201).json({
     data: {
       ...document,
@@ -2026,6 +2376,12 @@ app.delete('/api/workers/:id/documents/:documentId', requireAdmin, asyncRoute(as
     [req.params.documentId, worker.id, req.auth.tenantId]
   );
   if (!result.affectedRows) return res.status(404).json({ error: 'Document not found' });
+  await recordAudit(req, {
+    action: 'delete',
+    entityType: 'document',
+    entityId: req.params.documentId,
+    description: `Dokumen pekerja "${worker.full_name}" diarsipkan.`,
+  });
   res.status(204).end();
 }));
 
@@ -2059,6 +2415,12 @@ app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) =
           WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
         [effectiveDate, worker.id, req.auth.tenantId]
       );
+      await recordAudit(req, {
+        action: 'update',
+        entityType: 'worker_status',
+        entityId: worker.id,
+        description: `Penonaktifan pekerja "${worker.full_name}" dijadwalkan pada ${effectiveDate}.`,
+      }, connection);
       await connection.commit();
       return res.json({ data: { id: String(worker.id), status: worker.status, scheduled_inactive_date: effectiveDate } });
     }
@@ -2085,6 +2447,12 @@ app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) =
        VALUES (?, ?, ?, ?, ?)`,
       [req.auth.tenantId, worker.id, req.auth.userId, worker.status, status]
     );
+    await recordAudit(req, {
+      action: 'update',
+      entityType: 'worker_status',
+      entityId: worker.id,
+      description: `Status pekerja "${worker.full_name}" berubah dari ${worker.status} menjadi ${status}.`,
+    }, connection);
     await connection.commit();
     res.json({ data: { id: worker.id, status } });
   } catch (error) {
@@ -2145,8 +2513,26 @@ async function applyScheduledInactivations() {
           WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
         [worker.tenant_id, worker.id]
       );
+      await connection.execute(
+        `INSERT INTO audit_events
+           (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
+         VALUES (?, NULL, 'Sistem', 'system', 'update', 'worker_status', ?, ?)`,
+        [
+          worker.tenant_id,
+          String(worker.id),
+          `Status pekerja ${worker.id} berubah dari ${worker.status} menjadi inactive sesuai jadwal.`,
+        ]
+      );
     }
     await connection.commit();
+    for (const worker of workers) {
+      publishTenantEvent(worker.tenant_id, 'worker_changed', {
+        action: 'scheduled_inactivation',
+        worker_id: String(worker.id),
+      });
+      publishTenantEvent(worker.tenant_id, 'dashboard_updated', { action: 'scheduled_inactivation' });
+      publishTenantEvent(worker.tenant_id, 'history_updated', { action: 'scheduled_inactivation' });
+    }
     return workers.length;
   } catch (error) {
     await connection.rollback();
@@ -2160,11 +2546,72 @@ async function startServer() {
   getJwtSecret();
   await initializeDatabase();
   await applyScheduledInactivations();
+  const httpServer = http.createServer(app);
+  realtimeServer = new Server(httpServer, {
+    cors: {
+      origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+      credentials: true,
+    },
+  });
+  realtimeServer.use(async (socket, next) => {
+    let payload;
+    try {
+      const cookieHeader = socket.request.headers.cookie || '';
+      const sessionCookie = cookieHeader.split(';').map((part) => part.trim())
+        .find((part) => part.startsWith(`${COOKIE_NAME}=`));
+      if (!sessionCookie) return next(new Error('Authentication required'));
+      const token = decodeURIComponent(sessionCookie.slice(COOKIE_NAME.length + 1));
+      payload = jwt.verify(token, getJwtSecret(), { issuer: 'hrd-management' });
+    } catch {
+      return next(new Error('Session is invalid or expired'));
+    }
+    try {
+      const [rows] = await pool.execute(
+        `SELECT id, tenant_id, is_active, token_version
+           FROM users WHERE id = ? AND tenant_id = ?`,
+        [String(payload.sub), String(payload.tenantId)]
+      );
+      const user = rows[0];
+      if (!user || !user.is_active || Number(user.token_version) !== Number(payload.sessionVersion)) {
+        return next(new Error('Session is invalid or expired'));
+      }
+      socket.data.userId = String(user.id);
+      socket.data.tenantId = String(user.tenant_id);
+      socket.data.sessionVersion = Number(user.token_version);
+      socket.data.sessionExpiresAt = Number(payload.exp);
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
+  realtimeServer.on('connection', (socket) => {
+    socket.join(`tenant:${socket.data.tenantId}`);
+    socket.emit('realtime_ready', { connected: true });
+    const sessionCheck = setInterval(() => {
+      pool.execute(
+        `SELECT is_active, token_version FROM users
+          WHERE id = ? AND tenant_id = ?`,
+        [socket.data.userId, socket.data.tenantId]
+      ).then(([rows]) => {
+        const user = rows[0];
+        if (!user || !user.is_active
+          || Number(user.token_version) !== socket.data.sessionVersion
+          || Date.now() >= socket.data.sessionExpiresAt * 1000) {
+          socket.disconnect(true);
+        }
+      }).catch((error) => {
+        console.error('WebSocket session validation failed:', error);
+        socket.disconnect(true);
+      });
+    }, 60 * 1000);
+    sessionCheck.unref();
+    socket.on('disconnect', () => clearInterval(sessionCheck));
+  });
   const scheduledInactivationTimer = setInterval(() => {
     applyScheduledInactivations().catch((error) => console.error('Scheduled worker inactivation failed:', error));
   }, 60 * 1000);
   scheduledInactivationTimer.unref();
-  app.listen(PORT, () => console.log(`HRD API listening on http://localhost:${PORT}`));
+  httpServer.listen(PORT, () => console.log(`HRD API listening with real-time events on http://localhost:${PORT}`));
 }
 
 if (require.main === module) {
@@ -2204,6 +2651,7 @@ module.exports = {
   validWorkerId,
   validCoordinates,
   distanceInMeters,
+  implausibleLocationMovement,
   parseAllowedActivities,
   matchRequiredAttendanceLocation,
   validAttendanceLocationInput,
