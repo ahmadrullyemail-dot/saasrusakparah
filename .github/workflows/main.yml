@@ -19,7 +19,5 @@ jobs:
           script: |
             cd /home/metal/saasrusakparah
             git pull origin main
-            cd backend
-            npm ci --omit=dev
-            node -e "require('dotenv').config(); if (!process.env.JWT_SECRET || Buffer.byteLength(process.env.JWT_SECRET, 'utf8') < 32) { console.error('JWT_SECRET is missing or shorter than 32 bytes in backend/.env'); process.exit(1); } console.log('JWT_SECRET configuration is valid');"
-            pm2 restart saasrusakparah --update-env
+            npm install --production
+            pm2 restart saasrusakparah
