@@ -13,7 +13,7 @@ Vite meneruskan request `/api` dan Socket.IO `/socket.io` (termasuk upgrade WebS
 
 ## Deploy ke Vercel
 
-Atur **Root Directory** proyek Vercel ke `frontend`, Framework Preset ke **Vite**, Build Command ke `npm run build`, dan Output Directory ke `dist`. `vercel.json` meneruskan `/api/*` serta `/socket.io/*` ke backend VM dan mengarahkan `/presensi` ke SPA. Jika alamat atau port backend berubah, perbarui destination tersebut. Backend harus dapat diakses dari jaringan Vercel pada port yang dikonfigurasi; untuk deployment publik, HTTPS pada backend/reverse proxy disarankan. `server.proxy` di `vite.config.js` hanya digunakan oleh Vite development server dan bukan routing untuk deployment Vercel.
+Atur **Root Directory** proyek Vercel ke `frontend`, Framework Preset ke **Vite**, Build Command ke `npm run build`, dan Output Directory ke `dist`. `vercel.json` meneruskan `/api/*` serta `/socket.io/*` ke backend VM dan mengarahkan `/presensi` ke SPA. Jika alamat atau port backend berubah, perbarui destination tersebut. Backend harus dapat diakses dari jaringan Vercel pada port yang dikonfigurasi; untuk deployment publik, HTTPS pada backend/reverse proxy disarankan. Production client menggunakan transport polling Socket.IO karena koneksi polling dapat diteruskan oleh external rewrite Vercel; transport WebSocket tidak berhasil melewati konfigurasi rewrite yang digunakan. `server.proxy` di `vite.config.js` hanya digunakan oleh Vite development server dan bukan routing untuk deployment Vercel.
 
 ## Alur MVP
 

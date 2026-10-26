@@ -357,7 +357,7 @@ Browser web tidak menyediakan device attestation GPS tepercaya; client dapat dim
 
 - Backend membuat `http.Server` dari Express lalu memasang `new Server(httpServer, ...)`.
 - Path Socket.IO default `/socket.io`; CORS origin mengikuti `CORS_ORIGIN`, credentials diaktifkan.
-- Frontend membuat koneksi dengan `io({ withCredentials: true })`.
+- Development frontend menggunakan transport otomatis yang dapat upgrade ke WebSocket; production frontend di Vercel memakai HTTP long-polling saja karena upgrade WebSocket melalui external rewrite yang dipakai gagal, sementara polling berhasil.
 - Handshake membaca cookie `hrd_session`, memverifikasi JWT issuer/expiry, lalu memeriksa keberadaan user, `is_active` dan `token_version` di database.
 - Server menyimpan `userId`, `tenantId`, versi token dan waktu expiry pada `socket.data`.
 - Socket bergabung ke `tenant:<tenantId>` server-side. Client tidak mengirim nama room.

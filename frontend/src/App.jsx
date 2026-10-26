@@ -1290,7 +1290,10 @@ function WorkspaceApp() {
 
   useEffect(() => {
     if (!user) return undefined;
-    const socket = io({ withCredentials: true });
+    const socket = io({
+      withCredentials: true,
+      ...(import.meta.env.DEV ? {} : { transports: ['polling'] }),
+    });
     let mounted = true;
     let reconnectTimer;
     const scheduleSync = () => {
