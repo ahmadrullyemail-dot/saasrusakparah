@@ -1,6 +1,6 @@
 # Spesifikasi & Dokumentasi Teknis Menyeluruh
 
-**Ruang Kerja HRD**  
+**rusakparah.web.id**  
 Dokumen untuk developer, maintainer, dan operator teknis  
 Versi dokumen: 1.0 · Diperbarui: 25 Oktober 2026
 

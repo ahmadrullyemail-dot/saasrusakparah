@@ -28,7 +28,7 @@ const NAVIGATION_TABS = [
 ];
 
 const APP_THEMES = [
-  { id: 'standard', label: 'Default / Standard', description: 'Tampilan standar Ruang Kerja HRD.' },
+  { id: 'standard', label: 'Default / Standard', description: 'Tampilan standar rusakparah.web.id.' },
   { id: 'dark', label: 'Dark Mode', description: 'Tampilan gelap untuk kondisi cahaya rendah.' },
   { id: 'clean', label: 'Compact / Light Clean', description: 'Tampilan terang dengan jarak dan panel lebih ringkas.' },
 ];
@@ -301,9 +301,9 @@ function AuthScreen({ onAuthenticated, initialError }) {
   return (
     <main className="landing-page" id="home">
       <header className="landing-navbar">
-        <a className="landing-brand" href="#home" aria-label="Ruang Kerja HRD, beranda">
-          <span className="brand-mark">HR</span>
-          <span><strong>Ruang Kerja</strong><small>HRD Management</small></span>
+        <a className="landing-brand" href="#home" aria-label="rusakparah.web.id, beranda">
+          <span className="brand-mark">R</span>
+          <span><strong>rusakparah.web.id</strong><small>HRD Management</small></span>
         </a>
         <nav className="landing-nav" aria-label="Navigasi utama">
           <a className="landing-nav-home" href="#home">Home</a>
@@ -315,7 +315,7 @@ function AuthScreen({ onAuthenticated, initialError }) {
       <section className="landing-hero">
         <div className="landing-hero-copy">
           <p className="landing-kicker"><span /> PLATFORM OPERASIONAL HR TERPADU</p>
-          <h1>Kelola perjalanan pekerja, <span>lebih terarah.</span></h1>
+          <h1>Kelola timesheet pekerja, <span>lebih terarah.</span></h1>
           <p className="landing-lede">
             Satu ruang kerja untuk memantau siklus pekerja, presensi harian, dan dokumen penting—agar tim HR dapat fokus pada hal yang paling berarti.
           </p>
@@ -331,7 +331,7 @@ function AuthScreen({ onAuthenticated, initialError }) {
           <div className="landing-visual-orbit orbit-two" />
           <div className="landing-dashboard-card">
             <div className="landing-dashboard-top">
-              <div><span className="landing-mini-mark">HR</span><span><strong>Ringkasan</strong><small>Ruang Kerja HRD</small></span></div>
+              <div><span className="landing-mini-mark">R</span><span><strong>Ringkasan</strong><small>rusakparah.web.id</small></span></div>
               <span className="landing-live"><i /> PREVIEW</span>
             </div>
             <p className="landing-dashboard-caption">Status pekerja</p>
@@ -393,7 +393,7 @@ function AuthScreen({ onAuthenticated, initialError }) {
 
       <section className="landing-signin-section" id="signin">
         <div className="landing-signin-copy">
-          <p className="landing-kicker">RUANG KERJA TIM ANDA</p>
+          <p className="landing-kicker">RUSAKPARAH.WEB.ID UNTUK TIM HR ANDA</p>
           <h2>{registering ? 'Siapkan ruang kerja HR Anda.' : 'Selamat datang kembali.'}</h2>
           <p>{registering
             ? 'Daftarkan perusahaan untuk mulai mengelola informasi pekerja dan operasional HR.'
@@ -402,7 +402,7 @@ function AuthScreen({ onAuthenticated, initialError }) {
         </div>
         <section className="auth-card landing-auth-card" aria-labelledby="landing-auth-title">
           <div className="brand-mark">HR</div>
-          <p className="eyebrow">{registering ? 'MULAI GUNAKAN RUANG KERJA' : 'AKSES RUANG KERJA'}</p>
+          <p className="eyebrow">{registering ? 'MULAI GUNAKAN RUSAKPARAH.WEB.ID' : 'MASUK KE RUSAKPARAH.WEB.ID'}</p>
           <h2 id="landing-auth-title">{registering ? 'Daftarkan perusahaan' : 'Masuk ke akun Anda'}</h2>
           <p className="muted">
             {registering
@@ -444,7 +444,7 @@ function AuthScreen({ onAuthenticated, initialError }) {
       </section>
 
       <footer className="landing-footer">
-        <a className="landing-brand" href="#home"><span className="brand-mark">HR</span><span><strong>Ruang Kerja</strong><small>HRD Management</small></span></a>
+        <a className="landing-brand" href="#home"><span className="brand-mark">R</span><span><strong>rusakparah.web.id</strong><small>HRD Management</small></span></a>
         <span>Pengelolaan HR yang terhubung dan terarah.</span>
         <a href="#home">Kembali ke atas ↑</a>
       </footer>
@@ -2257,9 +2257,9 @@ function WorkspaceApp() {
     <div className={`app-shell theme-${theme}`}>
       <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-brand-row">
-          <a className="brand" href="#top" aria-label="Ruang Kerja HRD">
-            <span className="brand-mark">HR</span>
-            <span className="brand-copy"><strong>Ruang Kerja</strong><small>HRD Management</small></span>
+          <a className="brand" href="#top" aria-label="rusakparah.web.id">
+            <span className="brand-mark">R</span>
+            <span className="brand-copy"><strong>rusakparah.web.id</strong><small>HRD Management</small></span>
           </a>
           <button
             className="sidebar-toggle"

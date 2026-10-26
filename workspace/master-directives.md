@@ -8,6 +8,8 @@ Bertindak sebagai Lead Developer dan Project Manager untuk membangun produk SaaS
 
 Produk ini adalah SaaS HRD untuk client/perusahaan yang mengelola proses pekerja mulai setelah offering letter diberikan. Alur yang sudah diketahui:
 
+Brand aplikasi: **rusakparah.web.id**. Gunakan nama ini pada identitas visual, judul halaman, dan materi aplikasi; HRD Management tetap dapat dipakai sebagai deskripsi produk.
+
 1. Pekerja menerima offering letter.
 2. Persyaratan pra-aktif ditentukan perusahaan melalui katalog jenis dokumen dinamis; sistem tidak menetapkan jenis dokumen bawaan.
 3. Pekerja dapat menjadi aktif setelah dokumen yang diwajibkan perusahaan lengkap, valid, dan masih dalam masa berlaku.

@@ -1,6 +1,6 @@
 # Panduan Pengguna & Dokumentasi Fungsional
 
-**Ruang Kerja HRD**  
+**rusakparah.web.id**  
 Panduan untuk Admin, HR Staff, dan Viewer  
 Versi dokumen: 1.0 · Diperbarui: 25 Oktober 2026
 
@@ -24,7 +24,7 @@ Versi dokumen: 1.0 · Diperbarui: 25 Oktober 2026
 
 ## 1. Pengantar
 
-Ruang Kerja HRD adalah pusat operasional untuk mengelola siklus pekerja setelah menerima offering letter, kelengkapan dokumen, status keaktifan, dan presensi. Aplikasi membantu HRD melihat kondisi operasional perusahaan, menindaklanjuti dokumen yang mendekati atau melewati masa berlaku, serta meninjau pengajuan presensi.
+rusakparah.web.id adalah pusat operasional HRD untuk mengelola siklus pekerja setelah menerima offering letter, kelengkapan dokumen, status keaktifan, dan presensi. Aplikasi membantu HRD melihat kondisi operasional perusahaan, menindaklanjuti dokumen yang mendekati atau melewati masa berlaku, serta meninjau pengajuan presensi.
 
 Siklus status pekerja yang dikelola:
 
