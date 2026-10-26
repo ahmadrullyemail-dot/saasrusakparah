@@ -19,5 +19,6 @@ jobs:
           script: |
             cd /home/metal/saasrusakparah
             git pull origin main
-            npm install --production
-            pm2 restart saasrusakparah
+            cd backend
+            npm ci --omit=dev
+            pm2 restart saasrusakparah --update-env
