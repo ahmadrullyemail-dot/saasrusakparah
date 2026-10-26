@@ -5,6 +5,14 @@
       "destination": "http://35.224.177.116:4000/api/:path*"
     },
     {
+      "source": "/socket.io",
+      "destination": "http://35.224.177.116:4000/socket.io/"
+    },
+    {
+      "source": "/socket.io/",
+      "destination": "http://35.224.177.116:4000/socket.io/"
+    },
+    {
       "source": "/socket.io/:path*",
       "destination": "http://35.224.177.116:4000/socket.io/:path*"
     },
