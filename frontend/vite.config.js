@@ -5,9 +5,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:4000',
+      '/api': 'http://35.224.177.116:3200',
       '/socket.io': {
-        target: 'http://localhost:4000',
+        target: 'http://35.224.177.116:3200',
         ws: true,
       },
     },
