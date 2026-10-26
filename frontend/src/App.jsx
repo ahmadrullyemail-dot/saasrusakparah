@@ -148,6 +148,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const error = new Error(result.error || 'Permintaan gagal.');
     error.status = response.status;
+    error.code = result.code;
     throw error;
   }
   return result.data;
@@ -1488,7 +1489,12 @@ function WorkspaceApp() {
       setAttendanceLinks((current) => ({ ...current, [workerId]: link }));
       setNotice('Tautan presensi statis berhasil dimuat. Tautan akan tetap sama hingga salt perusahaan dirotasi.');
     } catch (requestError) {
-      showError(requestError);
+      if (requestError.code === 'ATTENDANCE_SALT_NOT_CONFIGURED') {
+        setError('Tautan presensi belum dapat dibuat. Admin perlu membuka Pengaturan → Pengaturan Presensi lalu membuat salt perusahaan terlebih dahulu.');
+        setNotice('');
+      } else {
+        showError(requestError);
+      }
     }
   }
 

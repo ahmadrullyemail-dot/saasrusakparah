@@ -1929,7 +1929,10 @@ app.post('/api/workers/:id/attendance-link', requireManager, asyncRoute(async (r
     );
     if (!settings[0]?.token_salt) {
       await connection.rollback();
-      return res.status(409).json({ error: 'Configure the company attendance salt in Settings first' });
+      return res.status(409).json({
+        error: 'Configure the company attendance salt in Settings first',
+        code: 'ATTENDANCE_SALT_NOT_CONFIGURED',
+      });
     }
     workerId = String(worker.id);
     token = createAttendanceToken(req.auth.tenantId, workerId, settings[0].token_salt);
