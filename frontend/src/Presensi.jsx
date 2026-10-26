@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon } from './components/Icon.jsx';
 
 const NAV_ITEMS = [
   { id: 'request', label: 'Pengajuan', icon: 'request' },
@@ -126,14 +127,8 @@ async function publicAttendanceRequest(path, options) {
 }
 
 function NavigationIcon({ name }) {
-  const paths = {
-    request: <><path d="M7 3.75h7l4.25 4.5v12A1.75 1.75 0 0 1 16.5 22h-9A1.75 1.75 0 0 1 5.75 20.25v-14A2.5 2.5 0 0 1 8.25 3.75" /><path d="M14 4v5h4.5M9 13h6M9 16.5h6" /></>,
-    history: <><path d="M4.5 8A8 8 0 1 1 3.75 13" /><path d="M3.75 5v4h4M12 7.5v5l3 1.75" /></>,
-    timer: <><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 1.5M9 2.75h6M12 2.75v2.5" /></>,
-    auto: <><path d="m12 3 1.55 5.45L19 10l-5.45 1.55L12 17l-1.55-5.45L5 10l5.45-1.55L12 3Z" /><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" /></>,
-    account: <><circle cx="12" cy="8" r="3.25" /><path d="M5.25 20a6.75 6.75 0 0 1 13.5 0" /></>,
-  };
-  return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
+  const icons = { request: 'fileCheck', history: 'history', timer: 'clock', auto: 'refresh', account: 'user' };
+  return <Icon name={icons[name]} />;
 }
 
 function ActionButton({ action, busy, disabled, onClick }) {
@@ -215,6 +210,7 @@ function TimerPanel({
             </div>
           )}
           <span className={`attendance-status-pill ${hasCheckIn ? 'checked' : ''} status-${attendance.status || 'pending'}`}>
+            <Icon name={hasCheckIn ? 'checkCircle' : 'clock'} size={14} />
             {statusText(attendance.status, hasCheckIn)}
           </span>
         </div>
@@ -227,14 +223,14 @@ function TimerPanel({
         ) : (
           <div className="attendance-timeline">
             <div className={`attendance-timeline-item ${hasCheckIn ? 'complete' : ''}`}>
-              <span className="attendance-timeline-marker" />
+              <span className="attendance-timeline-icon"><Icon name={hasCheckIn ? 'checkCircle' : 'clock'} size={17} /></span>
               <span><strong>Check-In</strong><small>{hasCheckIn ? formatTime(attendance.check_in_time) : 'Belum dilakukan'}</small></span>
-              {hasCheckIn && <span className="attendance-timeline-value">Tercatat</span>}
+              {hasCheckIn && <span className="attendance-timeline-value"><Icon name="check" size={13} /> Tercatat</span>}
             </div>
             <div className={`attendance-timeline-item ${hasCheckOut ? 'complete' : ''}`}>
-              <span className="attendance-timeline-marker" />
+              <span className="attendance-timeline-icon"><Icon name={hasCheckOut ? 'checkCircle' : 'clock'} size={17} /></span>
               <span><strong>Check-Out</strong><small>{hasCheckOut ? formatTime(attendance.check_out_time) : 'Belum dilakukan'}</small></span>
-              {hasCheckOut && <span className="attendance-timeline-value">Tercatat</span>}
+              {hasCheckOut && <span className="attendance-timeline-value"><Icon name="check" size={13} /> Tercatat</span>}
             </div>
           </div>
         )}
@@ -488,8 +484,20 @@ export default function Presensi() {
           </header>
           {attendance && !loading && !error && (
             <section className="attendance-worker-greeting">
+              <span className="attendance-greeting-avatar" aria-hidden="true">
+                {attendance.full_name?.trim()?.slice(0, 1)?.toUpperCase() || 'P'}
+              </span>
               <div className="attendance-greeting-copy">
+                <p className="eyebrow">PORTAL PEKERJA</p>
                 <h1>Halo, <span className="uppercase-text">{attendance.full_name}</span></h1>
+                <div className="attendance-worker-role">
+                  <span className="attendance-position-chip"><Icon name="briefcase" size={13} />{attendance.position || 'Pekerja'}</span>
+                  <span className="attendance-date-chip"><Icon name="calendar" size={13} />{currentTime.toLocaleDateString('id-ID', {
+                    day: 'numeric',
+                    month: 'long',
+                    timeZone: 'Asia/Jakarta',
+                  })}</span>
+                </div>
               </div>
             </section>
           )}
@@ -499,7 +507,7 @@ export default function Presensi() {
           <section className="attendance-state-card" role="status">Memuat data pekerja...</section>
         ) : error && !attendance ? (
           <section className="attendance-state-card attendance-state-error" role="alert">
-            <span className="attendance-state-icon">!</span>
+            <span className="attendance-state-icon"><Icon name="warning" /></span>
             <h1>Link presensi tidak dapat digunakan</h1>
             <p>{error}</p>
             <small>Pastikan link berasal dari dashboard HR dan memuat ID pekerja serta token yang sah.</small>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { APP_THEMES, ATTENDANCE_ACTIVITY_OPTIONS, USER_ROLE_LABELS } from '../config.js';
 import { formatCoordinate } from '../lib/hrd.js';
 import { AttendanceLocationsMap } from './AttendanceLocationsMap.jsx';
+import { Icon } from './Icon.jsx';
 
 export function DocumentWarningThresholdEditor({ type, defaultDays, busy, onSave }) {
   const [days, setDays] = useState(type.warning_threshold_days == null ? '' : String(type.warning_threshold_days));
@@ -35,8 +36,8 @@ export function DocumentWarningThresholdEditor({ type, defaultDays, busy, onSave
         aria-label={`Ambang peringatan ${type.name} dalam hari; kosong berarti default perusahaan`}
       />
       <span>{days === '' ? `Default · ${defaultDays} hari` : 'hari'}</span>
-      <button className="button secondary small-action" type="submit" disabled={busy || (days !== '' && (!/^\d+$/.test(days) || Number(days) < 1 || Number(days) > 365))}>Simpan</button>
-      {type.warning_threshold_days != null && <button className="button secondary small-action" type="button" disabled={busy} onClick={reset}>Reset</button>}
+      <button className="button secondary small-action" type="submit" disabled={busy || (days !== '' && (!/^\d+$/.test(days) || Number(days) < 1 || Number(days) > 365))}><Icon name="check" size={15} />Simpan</button>
+      {type.warning_threshold_days != null && <button className="button secondary small-action" type="button" disabled={busy} onClick={reset}><Icon name="refresh" size={15} />Reset</button>}
     </form>
   );
 }
@@ -143,12 +144,12 @@ export function SettingsPanel({
         <p className="muted">Kelola informasi akun dan keamanan ruang kerja <span className="uppercase-text">{user.company_name}</span>.</p>
       </div>
       <nav className="settings-tabs" aria-label="Bagian pengaturan">
-        <button type="button" className={`settings-tab ${section === 'profile' ? 'active' : ''}`} aria-pressed={section === 'profile'} onClick={() => setSection('profile')}>Profil Saya</button>
-        <button type="button" className={`settings-tab ${section === 'security' ? 'active' : ''}`} aria-pressed={section === 'security'} onClick={() => setSection('security')}>Keamanan</button>
-        {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'users' ? 'active' : ''}`} aria-pressed={section === 'users'} onClick={() => setSection('users')}>Manajemen User</button>}
-        {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'documents' ? 'active' : ''}`} aria-pressed={section === 'documents'} onClick={() => setSection('documents')}>Pengaturan Dokumen</button>}
-        {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'attendance' ? 'active' : ''}`} aria-pressed={section === 'attendance'} onClick={() => setSection('attendance')}>Pengaturan Presensi</button>}
-        {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'subscription' ? 'active' : ''}`} aria-pressed={section === 'subscription'} onClick={() => setSection('subscription')}>Paket Langganan</button>}
+        <button type="button" className={`settings-tab ${section === 'profile' ? 'active' : ''}`} aria-pressed={section === 'profile'} onClick={() => setSection('profile')}><Icon name="user" size={16} />Profil Saya</button>
+        <button type="button" className={`settings-tab ${section === 'security' ? 'active' : ''}`} aria-pressed={section === 'security'} onClick={() => setSection('security')}><Icon name="shield" size={16} />Keamanan</button>
+        {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'users' ? 'active' : ''}`} aria-pressed={section === 'users'} onClick={() => setSection('users')}><Icon name="users" size={16} />Manajemen User</button>}
+        {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'documents' ? 'active' : ''}`} aria-pressed={section === 'documents'} onClick={() => setSection('documents')}><Icon name="fileClock" size={16} />Pengaturan Dokumen</button>}
+        {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'attendance' ? 'active' : ''}`} aria-pressed={section === 'attendance'} onClick={() => setSection('attendance')}><Icon name="calendarClock" size={16} />Pengaturan Presensi</button>}
+        {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'subscription' ? 'active' : ''}`} aria-pressed={section === 'subscription'} onClick={() => setSection('subscription')}><Icon name="fileCheck" size={16} />Paket Langganan</button>}
       </nav>
 
       {section === 'profile' && (
@@ -168,7 +169,7 @@ export function SettingsPanel({
               {user.profile_photo_url
                 ? <img className="profile-photo" src={user.profile_photo_url} alt="" />
                 : <span className="profile-photo profile-placeholder">{user.full_name?.slice(0, 1).toUpperCase() || '?'}</span>}
-              <span className="profile-photo-edit" aria-hidden="true">Ubah</span>
+              <span className="profile-photo-edit" aria-hidden="true"><Icon name="pencil" size={13} />Ubah</span>
             </button>
             <input
               ref={profilePhotoInputRef}
@@ -189,7 +190,7 @@ export function SettingsPanel({
             <label>Nama lengkap<input className="uppercase-text" name="full_name" required maxLength="150" defaultValue={user.full_name} /></label>
             <label>Email<input value={user.email} readOnly /></label>
             <label>Role / jabatan<input value={USER_ROLE_LABELS[user.role] || user.role} readOnly /></label>
-            <div className="settings-actions settings-span"><button className="button primary" disabled={busy}>Simpan profil</button></div>
+            <div className="settings-actions settings-span"><button className="button primary" disabled={busy}><Icon name="check" size={16} />Simpan profil</button></div>
           </form>
         </section>
         <section className="panel settings-card theme-settings" aria-label="Tema tampilan">
@@ -220,7 +221,7 @@ export function SettingsPanel({
             <label>Password lama<input name="current_password" type="password" required autoComplete="current-password" /></label>
             <label>Password baru<input name="new_password" type="password" required minLength="12" maxLength="72" autoComplete="new-password" /><small>Minimal 12 karakter dan maksimal 72 byte UTF-8.</small></label>
             <label>Konfirmasi password baru<input name="confirm_password" type="password" required minLength="12" maxLength="72" autoComplete="new-password" /></label>
-            <div className="settings-actions"><button className="button primary" disabled={busy}>Perbarui password</button></div>
+            <div className="settings-actions"><button className="button primary" disabled={busy}><Icon name="shield" size={16} />Perbarui password</button></div>
           </form>
         </section>
       )}
@@ -313,6 +314,7 @@ export function SettingsPanel({
               <AttendanceLocationsMap
                 locations={attendanceLocations}
                 draft={attendanceLocationDraft}
+                active={active && section === 'attendance'}
                 onSelect={({ lat, lng }) => setAttendanceLocationDraft((current) => ({
                   ...current,
                   latitude: lat.toFixed(7),
@@ -362,7 +364,7 @@ export function SettingsPanel({
                     </label>
                   ))}
                 </fieldset>
-                <button className="button primary" type="submit" disabled={busy}>Simpan lokasi</button>
+                <button className="button primary" type="submit" disabled={busy}><Icon name="mapPin" size={16} />Simpan lokasi</button>
               </form>
             </div>
             <div className="attendance-location-list">
@@ -376,7 +378,7 @@ export function SettingsPanel({
                       ? `Wajib di area ini: ${location.allowed_activities.map((activity) => ATTENDANCE_ACTIVITY_OPTIONS.find(([key]) => key === activity)?.[1] || activity).join(' · ')}`
                       : 'Tidak ada aktivitas yang wajib berada di area ini; aktivitas dapat dilakukan dari luar area.'}</small>
                   </div>
-                  <button className="button danger" type="button" disabled={busy} onClick={() => onDeleteAttendanceLocation(location.id)}>Hapus</button>
+                  <button className="button danger" type="button" disabled={busy} onClick={() => onDeleteAttendanceLocation(location.id)}><Icon name="trash" size={15} />Hapus</button>
                 </article>
               ))}
               {!attendanceLocations.length && <p className="attendance-empty-locations">Belum ada lokasi geofence. Tambahkan titik pertama dengan klik peta atau koordinat.</p>}
@@ -404,7 +406,7 @@ export function SettingsPanel({
             aria-describedby="attendance-salt-confirm-description"
           >
             <div className="confirmation-modal-heading">
-              <span className="confirmation-warning-icon" aria-hidden="true">!</span>
+              <span className="confirmation-warning-icon"><Icon name="warning" /></span>
               <div>
                 <p className="eyebrow">{attendanceSaltConfirmStep === 2 ? 'KONFIRMASI KEDUA' : 'KONFIRMASI PENGATURAN'}</p>
                 <h2 id="attendance-salt-confirm-title">
@@ -470,13 +472,13 @@ export function SettingsPanel({
               <label>Password awal
                 <span className="password-generate">
                   <input name="password" type={showNewPassword ? 'text' : 'password'} required minLength="12" maxLength="72" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
-                  <button className="button secondary" type="button" onClick={() => setShowNewPassword((shown) => !shown)} aria-pressed={showNewPassword}>{showNewPassword ? 'Sembunyikan' : 'Tampilkan'}</button>
-                  <button className="button secondary" type="button" onClick={() => setNewPassword(generateTemporaryPassword())}>Generate</button>
+                  <button className="button secondary" type="button" onClick={() => setShowNewPassword((shown) => !shown)} aria-pressed={showNewPassword}><Icon name={showNewPassword ? 'eyeOff' : 'eye'} size={16} />{showNewPassword ? 'Sembunyikan' : 'Tampilkan'}</button>
+                  <button className="button secondary" type="button" onClick={() => setNewPassword(generateTemporaryPassword())}><Icon name="refresh" size={16} />Generate</button>
                 </span>
                 <small>Sampaikan password awal dengan aman kepada user.</small>
               </label>
               <label>Role / hak akses<select name="role" defaultValue="hr_manager"><option value="admin">Admin</option><option value="hr_manager">HR Staff</option><option value="viewer">Viewer</option></select></label>
-              <div className="settings-actions settings-span"><button className="button primary" disabled={busy}>Buat akun</button></div>
+              <div className="settings-actions settings-span">              <button className="button primary" disabled={busy}><Icon name="user" size={16} />Buat akun</button></div>
             </form>
           </section>
 
@@ -519,8 +521,8 @@ export function SettingsPanel({
                               });
                             }}>
                               <input aria-label="Password baru user" type={showResetPassword ? 'text' : 'password'} required minLength="12" maxLength="72" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="Password baru" />
-                              <button className="button secondary small-action" type="button" onClick={() => setShowResetPassword((shown) => !shown)} aria-pressed={showResetPassword}>{showResetPassword ? 'Sembunyikan' : 'Tampilkan'}</button>
-                              <button className="button secondary small-action" type="button" onClick={() => setResetPassword(generateTemporaryPassword())}>Generate</button>
+                              <button className="button secondary small-action" type="button" onClick={() => setShowResetPassword((shown) => !shown)} aria-pressed={showResetPassword}><Icon name={showResetPassword ? 'eyeOff' : 'eye'} size={15} />{showResetPassword ? 'Sembunyikan' : 'Tampilkan'}</button>
+                              <button className="button secondary small-action" type="button" onClick={() => setResetPassword(generateTemporaryPassword())}><Icon name="refresh" size={15} />Generate</button>
                               <button className="button primary small-action" disabled={busy}>Simpan</button>
                             </form>
                           )}
@@ -556,7 +558,7 @@ export function SettingsPanel({
               </div>
               <small>Masukkan bilangan bulat 1–365. Jenis dokumen dapat memakai nilai berbeda atau mengikuti default ini.</small>
               {documentSettings.updated_at && <small>Terakhir diperbarui: {new Date(documentSettings.updated_at).toLocaleString('id-ID')}</small>}
-              <div className="settings-actions"><button className="button primary" type="submit" disabled={busy || !/^\d+$/.test(warningThresholdDays) || Number(warningThresholdDays) < 1 || Number(warningThresholdDays) > 365}>Simpan default</button></div>
+              <div className="settings-actions">              <button className="button primary" type="submit" disabled={busy || !/^\d+$/.test(warningThresholdDays) || Number(warningThresholdDays) < 1 || Number(warningThresholdDays) > 365}><Icon name="check" size={16} />Simpan default</button></div>
             </form>
           </section>
           <section className="panel settings-card">
@@ -572,7 +574,7 @@ export function SettingsPanel({
             }}>
               <label htmlFor="new-document-type">Nama dokumen</label>
               <input className="uppercase-text" id="new-document-type" value={newDocumentTypeName} onChange={(event) => setNewDocumentTypeName(event.target.value)} required maxLength="100" placeholder="Contoh: Sertifikat K3" />
-              <button className="button primary" disabled={busy}>Tambah Dokumen</button>
+              <button className="button primary" disabled={busy}><Icon name="plus" size={16} />Tambah Dokumen</button>
             </form>
           </section>
 
@@ -596,8 +598,8 @@ export function SettingsPanel({
                             });
                           }}>
                             <input className="uppercase-text" aria-label={`Nama jenis dokumen ${type.name}`} value={editedDocumentTypeName} onChange={(event) => setEditedDocumentTypeName(event.target.value)} required maxLength="100" />
-                            <button className="button primary small-action" disabled={busy}>Simpan</button>
-                            <button className="button secondary small-action" type="button" disabled={busy} onClick={() => setEditingDocumentType(null)}>Batal</button>
+                            <button className="button primary small-action" disabled={busy}><Icon name="check" size={14} />Simpan</button>
+                            <button className="button secondary small-action" type="button" disabled={busy} onClick={() => setEditingDocumentType(null)}><Icon name="x" size={14} />Batal</button>
                           </form>
                         ) : <strong className="uppercase-text">{type.name}{type.is_builtin ? <small> Dokumen bawaan</small> : null}</strong>}
                       </td>
@@ -606,8 +608,8 @@ export function SettingsPanel({
                       <td><span className={`user-state ${type.is_active ? 'active' : 'inactive'}`}>{type.is_active ? 'Aktif' : 'Nonaktif'}</span></td>
                       <td>
                         <div className="user-actions">
-                          {editingDocumentType !== type.code && <button className="button secondary small-action" type="button" disabled={busy} onClick={() => { setEditingDocumentType(type.code); setEditedDocumentTypeName(type.name); }}>Edit nama</button>}
-                          <button className="button secondary small-action" type="button" disabled={busy} onClick={() => onUpdateDocumentType(type.code, { is_active: !type.is_active })}>{type.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>
+                          {editingDocumentType !== type.code && <button className="button secondary small-action" type="button" disabled={busy} onClick={() => { setEditingDocumentType(type.code); setEditedDocumentTypeName(type.name); }}><Icon name="pencil" size={14} />Edit nama</button>}
+                          <button className="button secondary small-action" type="button" disabled={busy} onClick={() => onUpdateDocumentType(type.code, { is_active: !type.is_active })}><Icon name={type.is_active ? 'x' : 'check'} size={14} />{type.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>
                         </div>
                       </td>
                     </tr>

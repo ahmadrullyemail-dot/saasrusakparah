@@ -10,6 +10,7 @@ import { AttendanceLocationsMap } from './components/AttendanceLocationsMap.jsx'
 import { SettingsPanel } from './components/SettingsPanel.jsx';
 import { StatCard, StatusBadge } from './components/StatCard.jsx';
 import { WorkerModal } from './components/WorkerModal.jsx';
+import { Icon } from './components/Icon.jsx';
 
 function WorkspaceApp() {
   const [user, setUser] = useState(null);
@@ -98,12 +99,15 @@ function WorkspaceApp() {
     });
     let mounted = true;
     let reconnectTimer;
-    const scheduleSync = () => {
+    const scheduleSync = (eventName) => {
       if (realtimeRefreshTimerRef.current) window.clearTimeout(realtimeRefreshTimerRef.current);
       realtimeRefreshTimerRef.current = window.setTimeout(async () => {
         try {
           const refreshTasks = [refreshDashboard(), refreshWorkers(), refreshSubscription()];
           const current = realtimeContextRef.current;
+          if (['documents_updated', 'settings_updated'].includes(eventName)) {
+            refreshTasks.push(refreshDocumentTypes());
+          }
           if (current.activeTab === 'attendance') {
             refreshTasks.push(
               api(`/attendance?date=${encodeURIComponent(current.attendanceDate)}`).then((data) => {
@@ -155,7 +159,7 @@ function WorkspaceApp() {
     socket.on('connect', setConnected);
     socket.on('disconnect', setDisconnected);
     socket.on('connect_error', setDisconnected);
-    eventNames.forEach((eventName) => socket.on(eventName, scheduleSync));
+    eventNames.forEach((eventName) => socket.on(eventName, () => scheduleSync(eventName)));
     return () => {
       mounted = false;
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
@@ -252,14 +256,21 @@ function WorkspaceApp() {
   }, [activeTab, user]);
 
   useEffect(() => {
-    if (!selectedId || !user) {
+    const query = profileWorkerSearch.trim().toLocaleLowerCase('id-ID');
+    const selectedWorkerMatchesSearch = query.length >= 3 && workers.some((worker) => {
+      if (String(worker.id) !== String(selectedId)) return false;
+      if (query.startsWith('id ')) return String(worker.id) === query.slice(3).trim();
+      return [worker.full_name, worker.position, worker.department]
+        .some((value) => String(value || '').toLocaleLowerCase('id-ID').includes(query));
+    });
+    if (activeTab !== 'documents' || !selectedId || !user || !selectedWorkerMatchesSearch) {
       setSelectedWorker(null);
       return;
     }
     api(`/workers/${selectedId}`)
       .then(setSelectedWorker)
       .catch(showError);
-  }, [selectedId, user, workers]);
+  }, [activeTab, profileWorkerSearch, selectedId, user, workers]);
 
   async function refreshDashboard() {
     setSummary(await api('/dashboard'));
@@ -1032,12 +1043,21 @@ function WorkspaceApp() {
     [workers, filter, workerSearch]
   );
 
+  const profileSearchTerm = profileWorkerSearch.trim();
+  const profileSearchReady = profileSearchTerm.length >= 3;
   const profileSearchResults = useMemo(() => {
-    const query = profileWorkerSearch.trim().toLocaleLowerCase('id-ID');
-    return workers.filter((worker) => !query
-      || [worker.full_name, worker.position, worker.department]
+    const query = profileSearchTerm.toLocaleLowerCase('id-ID');
+    if (query.length < 3) return [];
+    return workers.filter((worker) => query.startsWith('id ')
+      ? String(worker.id) === query.slice(3).trim()
+      : [worker.full_name, worker.position, worker.department]
         .some((value) => String(value || '').toLocaleLowerCase('id-ID').includes(query)));
   }, [workers, profileWorkerSearch]);
+  const selectedProfileWorker = profileSearchReady
+    && String(selectedWorker?.id) === String(selectedId)
+    && profileSearchResults.some((worker) => String(worker.id) === String(selectedId))
+    ? selectedWorker
+    : null;
 
   const expiringDocuments = useMemo(() => workers.flatMap((worker) => (
     (worker.documents || [])
@@ -1052,12 +1072,21 @@ function WorkspaceApp() {
       })
       .map((document) => ({
         ...document,
+        worker_id: worker.id,
         warning_threshold_days: documentTypes.find((type) => type.code === document.type)?.warning_threshold_days
           ?? summary?.document_warning_threshold_days
           ?? 30,
         worker_name: worker.full_name,
       }))
   )).sort((left, right) => left.valid_until.localeCompare(right.valid_until)), [workers, documentTypes, summary?.document_warning_start_date, summary?.document_warning_threshold_days]);
+
+  function openDocumentFollowUp(document) {
+      const worker = workers.find((candidate) => String(candidate.id) === String(document.worker_id));
+      if (!worker) return;
+      setProfileWorkerSearch(`ID ${worker.id}`);
+      setSelectedId(worker.id);
+      setActiveTab('documents');
+  }
 
   const monthlyWorkerRows = useMemo(() => {
     const grouped = new Map();
@@ -1098,6 +1127,12 @@ function WorkspaceApp() {
   const workerQuotaFull = subscription?.worker_limit != null
     && subscription.active_workers >= subscription.worker_limit;
 
+  function openWorkerStatus(status) {
+    setFilter(status);
+    setWorkerSearch('');
+    setActiveTab('workers');
+  }
+
   function selectMatrixAttendanceDate(day) {
     const date = `${attendanceMonth}-${String(day).padStart(2, '0')}`;
     setAttendanceDate(date);
@@ -1133,7 +1168,7 @@ function WorkspaceApp() {
               setSidebarCollapsed((collapsed) => !collapsed);
             }}
           >
-            <span aria-hidden="true">{sidebarCollapsed ? '›' : '‹'}</span>
+            <Icon name={sidebarCollapsed ? 'chevronRight' : 'chevronLeft'} />
           </button>
         </div>
         <div className="tenant-card">
@@ -1155,16 +1190,16 @@ function WorkspaceApp() {
               aria-label={tab.label}
               onClick={() => setActiveTab(tab.id)}
             >
-              <span className="nav-icon" aria-hidden="true">{tab.icon}</span>
+              <span className="nav-icon"><Icon name={tab.icon} /></span>
               <span className="nav-label">{tab.label}</span>
             </button>
           ))}
         </nav>
         <div className="sidebar-note">
-          <span className="note-icon">i</span>
+          <span className="note-icon"><Icon name="info" size={16} /></span>
           <p>Status kelayakan adalah rekomendasi. Aktivasi dan penonaktifan tetap dilakukan HRD.</p>
         </div>
-        <button className="button sidebar-logout" onClick={logout} aria-label="Keluar" title={sidebarCollapsed ? 'Keluar' : undefined}>Keluar</button>
+        <button className="button sidebar-logout" onClick={logout} aria-label="Keluar" title={sidebarCollapsed ? 'Keluar' : undefined}><Icon name="logout" size={17} /> Keluar</button>
       </aside>
 
       <main className={`main-content ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} id="top">
@@ -1186,7 +1221,7 @@ function WorkspaceApp() {
                 disabled={busy || workerQuotaFull}
                 title={workerQuotaFull ? 'Kuota pekerja aktif paket Free sudah penuh.' : undefined}
               >
-                <span aria-hidden="true">+</span> Tambah Pekerja
+                <Icon name="plus" size={17} /> Tambah Pekerja
               </button>
             )}
             {workerQuotaFull && <span className="worker-quota-topbar-note" role="status">Kuota pekerja paket Free penuh</span>}
@@ -1201,8 +1236,8 @@ function WorkspaceApp() {
           </div>
         </header>
 
-        {error && !workerModalOpen && <div className="notice error" role="alert">{error}<button onClick={() => setError('')}>Tutup</button></div>}
-        {notice && <div className="notice success" role="status">{notice}<button onClick={() => setNotice('')}>Tutup</button></div>}
+        {error && !workerModalOpen && <div className="notice error" role="alert">{error}<button onClick={() => setError('')}><Icon name="x" size={15} />Tutup</button></div>}
+        {notice && <div className="notice success" role="status">{notice}<button onClick={() => setNotice('')}><Icon name="x" size={15} />Tutup</button></div>}
         {workerModalOpen && (
           <WorkerModal
             key={editingWorker?.id || 'new-worker'}
@@ -1229,13 +1264,115 @@ function WorkspaceApp() {
             <span className="overview-live"><i /> Data diperbarui otomatis</span>
           </div>
           <div className="stats-grid">
-            <StatCard label="Offering" value={summary?.offered ?? '—'} tone="violet" />
-            <StatCard label="Pra-aktif" value={summary?.preactive ?? '—'} tone="blue" />
-            <StatCard label="Aktif" value={summary?.active ?? '—'} tone="green" />
-            <StatCard label="Nonaktif" value={summary?.inactive ?? '—'} tone="slate" />
-            <StatCard label="Dokumen perlu tindak lanjut" value={summary?.expiring_documents ?? '—'} tone="amber" />
-            <StatCard label="Klaim presensi pending" value={summary?.pending_attendance_claims ?? '—'} tone="rose" />
+            <StatCard label="Offering" value={summary?.offered ?? '—'} tone="violet" icon="file" onClick={() => openWorkerStatus('offered')} />
+            <StatCard label="Pra-aktif" value={summary?.preactive ?? '—'} tone="blue" icon="clock" onClick={() => openWorkerStatus('preactive')} />
+            <StatCard label="Aktif" value={summary?.active ?? '—'} tone="green" icon="users" onClick={() => openWorkerStatus('active')} />
+            <StatCard label="Nonaktif" value={summary?.inactive ?? '—'} tone="slate" icon="archive" onClick={() => openWorkerStatus('inactive')} />
+            <StatCard label="Dokumen perlu tindak lanjut" value={summary?.expiring_documents ?? '—'} tone="amber" icon="fileClock" onClick={() => setActiveTab('documents')} />
+            <StatCard label="Klaim presensi pending" value={summary?.pending_attendance_claims ?? '—'} tone="rose" icon="calendarClock" onClick={() => setActiveTab('attendance')} />
           </div>
+          <section className="dashboard-document-card" aria-labelledby="dashboard-documents-heading">
+            <div className="dashboard-document-heading">
+              <div>
+                <p className="eyebrow">TINDAK LANJUT DOKUMEN</p>
+                <h3 id="dashboard-documents-heading">Masa berlaku</h3>
+                <p className="muted">Dokumen kedaluwarsa atau memasuki ambang peringatan perusahaan.</p>
+              </div>
+              <div className="dashboard-document-heading-actions">
+                <span className={`count-pill ${expiringDocuments.length ? 'pending-count' : ''}`}>
+                  {expiringDocuments.length} perlu ditinjau
+                </span>
+                <button className="button secondary" type="button" onClick={() => setActiveTab('documents')}>
+                  Lihat semua
+                </button>
+              </div>
+            </div>
+            {expiringDocuments.length ? (
+              <ul className="dashboard-document-list">
+                {expiringDocuments.slice(0, 5).map((document) => {
+                  const warningStartDate = summary?.document_warning_start_date || localDateString();
+                  const expired = document.status === 'expired' || document.valid_until < warningStartDate;
+                  return (
+                    <li key={`${document.worker_id}-${document.id}`}>
+                      <button
+                        className="dashboard-document-item"
+                        type="button"
+                        onClick={() => openDocumentFollowUp(document)}
+                        aria-label={`Buka dokumen ${document.type} milik ${document.worker_name}`}
+                      >
+                        <span className={`dashboard-document-indicator ${expired ? 'expired' : ''}`} aria-hidden="true" />
+                        <span className="dashboard-document-main">
+                          <strong className="uppercase-text">{document.worker_name}</strong>
+                          <small>
+                            <span className="uppercase-text">{documentTypeName(document.type, documentTypes)}</span>
+                            {' · '}
+                            <span className={expired ? 'dashboard-document-expired' : 'dashboard-document-upcoming'}>
+                              {expired ? 'Kedaluwarsa' : `Segera kedaluwarsa · ambang ${document.warning_threshold_days} hari`}
+                            </span>
+                          </small>
+                        </span>
+                        <span className="dashboard-document-date">
+                          <small>Berakhir</small>
+                          <time dateTime={document.valid_until}>{new Date(`${document.valid_until}T00:00:00`).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</time>
+                        </span>
+                        <span className="dashboard-document-open"><Icon name="arrowRight" size={16} /></span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <div className="dashboard-document-empty">
+                <Icon name="checkCircle" />
+                <p>Tidak ada dokumen yang kedaluwarsa atau memasuki ambang peringatan saat ini.</p>
+              </div>
+            )}
+            {expiringDocuments.length > 5 && (
+              <p className="dashboard-document-footnote">
+                Menampilkan 5 dari {expiringDocuments.length} dokumen yang perlu ditinjau.
+              </p>
+            )}
+          </section>
+          <section className="dashboard-approval-card" aria-labelledby="dashboard-approval-heading">
+            <div className="dashboard-approval-icon"><Icon name="checkCircle" /></div>
+            <div className="dashboard-approval-copy">
+              <p className="eyebrow">TINJAUAN HR</p>
+              <h3 id="dashboard-approval-heading">Pusat Persetujuan</h3>
+              <p className="muted">
+                {summary?.pending_attendance_claims
+                  ? 'Klaim presensi menunggu pemeriksaan Admin.'
+                  : 'Tidak ada klaim presensi yang menunggu tinjauan.'}
+              </p>
+            </div>
+            <div className={`dashboard-approval-count ${summary?.pending_attendance_claims ? 'has-pending' : ''}`}>
+              <strong>{summary?.pending_attendance_claims ?? '—'}</strong>
+              <span>pending</span>
+            </div>
+            <button className="button secondary dashboard-approval-action" type="button" onClick={() => setActiveTab('attendance')}>
+              {summary?.pending_attendance_claims ? 'Tinjau klaim' : 'Buka presensi'}
+              <span aria-hidden="true">→</span>
+            </button>
+          </section>
+          {/*<section className="dashboard-actions" aria-label="Aksi cepat">
+            <div>
+              <p className="eyebrow">LANGKAH CEPAT</p>
+              <h3>Tindak lanjuti operasional</h3>
+              <p className="muted">Buka pekerjaan yang membutuhkan perhatian tim HR.</p>
+            </div>
+            <div className="dashboard-action-buttons">
+              {user.role !== 'viewer' && (
+                <button className="button primary" type="button" disabled={busy || workerQuotaFull} onClick={openWorkerModal}>
+                  <span aria-hidden="true">+</span> Tambah pekerja
+                </button>
+              )}
+              <button className="button secondary" type="button" onClick={() => setActiveTab('documents')}>
+                Tinjau dokumen <span className="action-count">{summary?.expiring_documents ?? '—'}</span>
+              </button>
+              <button className="button secondary" type="button" onClick={() => setActiveTab('attendance')}>
+                Buka presensi <span className="action-count">{summary?.pending_attendance_claims ?? '—'}</span>
+              </button>
+            </div>
+          </section>*/}
           {subscription && subscription.worker_limit != null && (
             <section className={`worker-quota-card ${workerQuotaFull ? 'at-limit' : ''}`} aria-label="Penggunaan kuota pekerja">
               <div className="worker-quota-heading">
@@ -1361,16 +1498,30 @@ function WorkspaceApp() {
         >
           <div className="panel detail-panel">
             <div className="profile-worker-picker">
-              <label htmlFor="profile-worker-search">Cari dan pilih profil pekerja</label>
-              <input
-                id="profile-worker-search"
-                type="search"
-                value={profileWorkerSearch}
-                onChange={(event) => setProfileWorkerSearch(event.target.value)}
-                placeholder="Nama, posisi, atau departemen"
-              />
+              <label htmlFor="profile-worker-search">Cari pekerja untuk melihat dokumen</label>
+              <div className="profile-search-control">
+                <span className="profile-search-icon"><Icon name="search" size={17} /></span>
+                <input
+                  id="profile-worker-search"
+                  type="search"
+                  value={profileWorkerSearch}
+                  onChange={(event) => setProfileWorkerSearch(event.target.value)}
+                  placeholder="Nama, posisi, departemen, atau ID pekerja (min. 3)"
+                  aria-describedby="profile-worker-search-help"
+                />
+                {profileWorkerSearch && (
+                  <button type="button" onClick={() => setProfileWorkerSearch('')} aria-label="Hapus pencarian pekerja">
+                    <Icon name="x" size={16} />
+                  </button>
+                )}
+              </div>
+              <p className={`profile-search-help ${profileSearchReady ? 'search-ready' : ''}`} id="profile-worker-search-help" role="status">
+                {profileSearchReady
+                  ? `Menampilkan ${Math.min(profileSearchResults.length, 6)} dari ${workers.length} pekerja · ${profileSearchResults.length} cocok`
+                  : `Masukkan minimal 3 karakter untuk mencari pekerja${profileSearchTerm ? ` · ${Math.max(0, 3 - profileSearchTerm.length)} karakter lagi` : ''}.`}
+              </p>
               <div className="profile-worker-options" aria-label="Daftar hasil pekerja">
-                {profileSearchResults.slice(0, 6).map((worker) => (
+                {profileSearchReady && profileSearchResults.slice(0, 6).map((worker) => (
                   <button
                     className={`profile-worker-option ${selectedId === worker.id ? 'selected' : ''}`}
                     type="button"
@@ -1381,33 +1532,35 @@ function WorkspaceApp() {
                     <small className="uppercase-text">{worker.position} · {worker.department}</small>
                   </button>
                 ))}
-                {!profileSearchResults.length && <span className="muted">Tidak ada pekerja yang cocok.</span>}
+                {profileSearchReady && !profileSearchResults.length && <span className="muted">Tidak ada pekerja yang cocok dengan pencarian ini.</span>}
               </div>
             </div>
             <div className="panel-heading">
-              <div><p className="eyebrow">PROFIL & KELAYAKAN</p><h2 className="uppercase-text">{selectedWorker?.full_name || 'Pilih pekerja'}</h2></div>
-              {selectedWorker && <StatusBadge status={selectedWorker.status} />}
+              <div><p className="eyebrow">PROFIL & KELAYAKAN</p><h2 className="uppercase-text">{selectedProfileWorker?.full_name || 'Pilih pekerja'}</h2></div>
+              {selectedProfileWorker && <StatusBadge status={selectedProfileWorker.status} />}
             </div>
-            {!selectedWorker ? (
-              <p className="muted empty-detail">Pilih pekerja pada daftar untuk melihat dokumen, kelayakan, dan riwayat status.</p>
+            {!selectedProfileWorker ? (
+              <p className="muted empty-detail">{profileSearchReady
+                ? 'Pilih pekerja dari hasil pencarian untuk melihat dokumen, kelayakan, dan riwayat status.'
+                : 'Hasil profil dan dokumen akan ditampilkan setelah pencarian mencapai minimal 3 karakter.'}</p>
             ) : (
               <>
-                <div className={`eligibility-banner ${selectedWorker.eligibility.eligible ? 'eligible' : 'ineligible'}`}>
-                  <strong>{selectedWorker.eligibility.eligible ? 'Persyaratan dokumen terpenuhi' : 'Persyaratan dokumen belum terpenuhi'}</strong>
-                  <span>{selectedWorker.eligibility.eligible ? 'HRD dapat mempertimbangkan aktivasi.' : 'Lengkapi dokumen wajib yang masih kurang atau kedaluwarsa.'}</span>
+                <div className={`eligibility-banner ${selectedProfileWorker.eligibility.eligible ? 'eligible' : 'ineligible'}`}>
+                  <strong>{selectedProfileWorker.eligibility.eligible ? 'Persyaratan dokumen terpenuhi' : 'Persyaratan dokumen belum terpenuhi'}</strong>
+                  <span>{selectedProfileWorker.eligibility.eligible ? 'HRD dapat mempertimbangkan aktivasi.' : 'Lengkapi dokumen wajib yang masih kurang atau kedaluwarsa.'}</span>
                 </div>
                 <div className="requirement-list">
-                  {selectedWorker.eligibility.checks.map((check) => (
+                  {selectedProfileWorker.eligibility.checks.map((check) => (
                     <div className="requirement-item" key={check.type}>
                       <span className="uppercase-text">{documentTypeName(check.type, documentTypes)}</span>
                       <span className={`readiness ${check.valid ? 'ready' : 'needs-work'}`}>{check.valid ? 'Valid' : 'Belum valid'}</span>
                     </div>
                   ))}
                 </div>
-                <div className="document-heading"><h3>Riwayat dokumen</h3><span>{selectedWorker.documents.length} catatan</span></div>
-                {selectedWorker.documents.length ? (
+                <div className="document-heading"><h3>Riwayat dokumen</h3><span>{selectedProfileWorker.documents.length} catatan</span></div>
+                {selectedProfileWorker.documents.length ? (
                   <div className="document-list">
-                      {selectedWorker.documents.map((document) => {
+                      {selectedProfileWorker.documents.map((document) => {
                         const state = documentState(document);
                         return (
                           <article className="document-item" key={document.id}>
@@ -1420,20 +1573,20 @@ function WorkspaceApp() {
                                   : `${document.valid_from || 'Tanggal mulai —'} hingga ${document.valid_until || 'tanpa tanggal akhir'}`}
                             </small></span>
                             <span className={`readiness ${state.valid ? 'ready' : 'needs-work'}`}>{state.label}</span>
-                            {user.role === 'admin' && <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveDocument(selectedWorker.id, document.id)}>Arsipkan</button>}
+                            {user.role === 'admin' && <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveDocument(selectedProfileWorker.id, document.id)}>Arsipkan</button>}
                           </article>
                         );
                       })}
                   </div>
                 ) : <p className="muted">Belum ada dokumen dicatat.</p>}
                 {user.role === 'admin' && <div className="status-controls">
-                  {selectedWorker.status === 'offered' && <button className="button secondary" disabled={busy} onClick={() => changeStatus('preactive')}>Pindahkan ke pra-aktif</button>}
-                  {['preactive', 'inactive'].includes(selectedWorker.status) && (
-                    <button className="button primary" disabled={busy || !selectedWorker.eligibility.eligible} onClick={() => changeStatus('active')}>
-                      {selectedWorker.status === 'inactive' ? 'Aktifkan kembali' : 'Aktifkan pekerja'}
+                  {selectedProfileWorker.status === 'offered' && <button className="button secondary" disabled={busy} onClick={() => changeStatus('preactive')}>Pindahkan ke pra-aktif</button>}
+                  {['preactive', 'inactive'].includes(selectedProfileWorker.status) && (
+                    <button className="button primary" disabled={busy || !selectedProfileWorker.eligibility.eligible} onClick={() => changeStatus('active')}>
+                      {selectedProfileWorker.status === 'inactive' ? 'Aktifkan kembali' : 'Aktifkan pekerja'}
                     </button>
                   )}
-                  {['active', 'preactive'].includes(selectedWorker.status) && (
+                  {['active', 'preactive'].includes(selectedProfileWorker.status) && (
                     <div className="scheduled-inactive-control">
                       <label htmlFor="scheduled-inactive-date">Tanggal efektif nonaktif</label>
                       <input
@@ -1447,12 +1600,12 @@ function WorkspaceApp() {
                       <button className="button danger" disabled={busy || !scheduledInactiveDate} onClick={() => changeStatus('inactive', scheduledInactiveDate)}>Jadwalkan nonaktif</button>
                     </div>
                   )}
-                  <button className="button danger" disabled={busy} onClick={() => archiveWorker(selectedWorker.id)}>Arsipkan pekerja</button>
+                  <button className="button danger" disabled={busy} onClick={() => archiveWorker(selectedProfileWorker.id)}>Arsipkan pekerja</button>
                 </div>}
-                {selectedWorker.history?.length > 0 && (
+                {selectedProfileWorker.history?.length > 0 && (
                   <div className="history-line">
                     <h3>Riwayat status</h3>
-                    {selectedWorker.history.map((entry) => (
+                    {selectedProfileWorker.history.map((entry) => (
                       <p key={entry.id}>{STATUS_LABELS[entry.previous_status] || 'Baru'} → {STATUS_LABELS[entry.new_status]} <small>oleh {entry.changed_by || 'pengguna'} · {new Date(entry.created_at).toLocaleDateString('id-ID')}</small></p>
                     ))}
                   </div>
@@ -1464,9 +1617,9 @@ function WorkspaceApp() {
           <div className="right-column">
             {user.role !== 'viewer' ? <section className="panel document-form-panel">
               <div className="panel-heading"><div><p className="eyebrow">KELENGKAPAN</p><h2>Catat dokumen</h2></div></div>
-              {!selectedWorker ? <p className="muted">Pilih pekerja terlebih dahulu.</p> : (
+              {!selectedProfileWorker ? <p className="muted">Cari dan pilih pekerja setelah memasukkan minimal 3 karakter.</p> : (
                 <form className="form-stack" onSubmit={handleCreateDocument}>
-                  <label>Jenis dokumen<select className="uppercase-text" name="type" required disabled={!documentTypes.some((type) => type.is_active || selectedWorker.required_document_types.includes(type.code))}>{documentTypes.filter((type) => type.is_active || selectedWorker.required_document_types.includes(type.code)).map((type) => <option value={type.code} key={type.code}>{type.name}{type.is_active ? '' : ' (Nonaktif)'}</option>)}</select></label>
+                  <label>Jenis dokumen<select className="uppercase-text" name="type" required disabled={!documentTypes.some((type) => type.is_active || selectedProfileWorker.required_document_types.includes(type.code))}>{documentTypes.filter((type) => type.is_active || selectedProfileWorker.required_document_types.includes(type.code)).map((type) => <option value={type.code} key={type.code}>{type.name}{type.is_active ? '' : ' (Nonaktif)'}</option>)}</select></label>
                   <label>Status<select name="status" value={documentStatus} onChange={(event) => setDocumentStatus(event.target.value)}><option value="pending">Menunggu pemeriksaan</option><option value="valid">Valid</option><option value="expired">Kedaluwarsa</option><option value="rejected">Ditolak</option></select></label>
                   {documentStatus === 'pending' && (
                     <label>Target Selesai<input type="date" name="target_completion_date" /></label>
@@ -1477,7 +1630,7 @@ function WorkspaceApp() {
                       <label>Berlaku hingga<input type="date" name="valid_until" /></label>
                     </div>
                   )}
-                  <button className="button primary" disabled={busy || !documentTypes.some((type) => type.is_active || selectedWorker.required_document_types.includes(type.code))}>Simpan dokumen</button>
+                  <button className="button primary" disabled={busy || !documentTypes.some((type) => type.is_active || selectedProfileWorker.required_document_types.includes(type.code))}>Simpan dokumen</button>
                   <small>Hasil medis rinci dan catatan bebas tidak disimpan.</small>
                 </form>
               )}

@@ -8,14 +8,24 @@ const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const nodemailer = require('nodemailer');
 const { Server } = require('socket.io');
 const { pool, initializeDatabase } = require('./db');
 
 const app = express();
 let realtimeServer;
 const PORT = Number(process.env.PORT || 4000);
+const TRUST_PROXY_HOPS = Number(process.env.TRUST_PROXY_HOPS || 0);
+if (!Number.isInteger(TRUST_PROXY_HOPS) || TRUST_PROXY_HOPS < 0 || TRUST_PROXY_HOPS > 10) {
+  throw new Error('TRUST_PROXY_HOPS must be an integer from 0 to 10');
+}
+app.set('trust proxy', TRUST_PROXY_HOPS);
 const COOKIE_NAME = 'hrd_session';
 const MAX_PROFILE_PHOTO_BYTES = 900 * 1024;
+const PASSWORD_RESET_TOKEN_TTL_MINUTES = 30;
+const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_RATE_LIMIT_MAX = 10;
+const authRateLimits = new Map();
 const WORKER_STATUSES = new Set(['offered', 'preactive', 'active', 'inactive']);
 const DOCUMENT_STATUSES = new Set(['pending', 'valid', 'expired', 'rejected']);
 const CONTRACT_TYPES = new Set(['pkwt', 'pkwtt', 'freelance', 'daily_worker']);
@@ -352,6 +362,74 @@ function canTransitionStatus(previousStatus, nextStatus) {
 
 function hashEmail(email) {
   return crypto.createHash('sha256').update(email.trim().toLowerCase(), 'utf8').digest();
+}
+
+function hashPasswordResetToken(token) {
+  return crypto.createHash('sha256').update(token, 'utf8').digest();
+}
+
+function takeAuthRateLimit(ipAddress, now = Date.now()) {
+  if (authRateLimits.size > 10000) {
+    for (const [key, entry] of authRateLimits) {
+      if (entry.resetAt <= now) authRateLimits.delete(key);
+    }
+  }
+  const current = authRateLimits.get(ipAddress);
+  if (!current || current.resetAt <= now) {
+    if (authRateLimits.size >= 10000) {
+      for (const [key, entry] of authRateLimits) {
+        if (entry.resetAt <= now) authRateLimits.delete(key);
+      }
+      while (authRateLimits.size >= 10000) {
+        authRateLimits.delete(authRateLimits.keys().next().value);
+      }
+    }
+    authRateLimits.set(ipAddress, { count: 1, resetAt: now + AUTH_RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (current.count >= AUTH_RATE_LIMIT_MAX) return false;
+  current.count += 1;
+  return true;
+}
+
+function passwordResetMailer() {
+  const host = process.env.SMTP_HOST;
+  const from = process.env.SMTP_FROM;
+  const frontendUrl = process.env.FRONTEND_URL;
+  if (!host || !from || !frontendUrl) return null;
+  const parsedFrontendUrl = new URL(frontendUrl);
+  if (!['http:', 'https:'].includes(parsedFrontendUrl.protocol) || !parsedFrontendUrl.host) {
+    throw new Error('FRONTEND_URL must be an absolute HTTP(S) URL');
+  }
+  if (Boolean(process.env.SMTP_USER) !== Boolean(process.env.SMTP_PASSWORD)) {
+    throw new Error('SMTP_USER and SMTP_PASSWORD must be configured together');
+  }
+  const port = Number(process.env.SMTP_PORT || 587);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('SMTP_PORT must be a valid TCP port');
+  }
+  return {
+    transporter: nodemailer.createTransport({
+      host,
+      port,
+      secure: process.env.SMTP_SECURE === 'true' || port === 465,
+      ...(process.env.SMTP_USER ? {
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD || '' },
+      } : {}),
+    }),
+    from,
+    frontendUrl: parsedFrontendUrl.toString().replace(/\/+$/, ''),
+  };
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character]);
 }
 
 function hashNormalizedText(value) {
@@ -952,6 +1030,122 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
       company_name: user.company_name,
     },
   });
+}));
+
+app.post('/api/auth/forgot-password', asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!takeAuthRateLimit(req.ip || req.socket.remoteAddress || 'unknown')) {
+    return res.status(429).json({ error: 'Too many password recovery requests. Try again later.' });
+  }
+  const { email } = req.body || {};
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    return res.status(400).json({ error: 'Provide a valid email address' });
+  }
+  let mailer;
+  try {
+    mailer = passwordResetMailer();
+  } catch (error) {
+    console.error('Password reset mail configuration error:', error.message);
+    return res.status(503).json({ error: 'Password recovery is temporarily unavailable' });
+  }
+  if (!mailer) {
+    return res.status(503).json({ error: 'Password recovery is temporarily unavailable' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const [users] = await pool.execute(
+    `SELECT id, full_name FROM users
+      WHERE email_hash = ? AND email = ? AND is_active = 1
+      LIMIT 1`,
+    [hashEmail(normalizedEmail), normalizedEmail]
+  );
+  const user = users[0];
+  await pool.execute(
+    'DELETE FROM password_reset_tokens WHERE expires_at <= CURRENT_TIMESTAMP OR used_at IS NOT NULL'
+  );
+  if (user) {
+    const token = crypto.randomBytes(32).toString('base64url');
+    await pool.execute('DELETE FROM password_reset_tokens WHERE user_id = ?', [user.id]);
+    await pool.execute(
+      `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+       VALUES (?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL ${PASSWORD_RESET_TOKEN_TTL_MINUTES} MINUTE))`,
+      [user.id, hashPasswordResetToken(token)]
+    );
+    const resetUrl = new URL('/#reset-password', `${mailer.frontendUrl}/`);
+    resetUrl.searchParams.set('token', token);
+    try {
+      const safeName = escapeHtml(user.full_name || 'pengguna');
+      await mailer.transporter.sendMail({
+        from: mailer.from,
+        to: normalizedEmail,
+        subject: 'Atur ulang kata sandi Ruang Kerja HRD',
+        text: `Halo ${user.full_name || 'pengguna'},\n\nGunakan tautan berikut dalam ${PASSWORD_RESET_TOKEN_TTL_MINUTES} menit untuk mengatur ulang kata sandi:\n${resetUrl.toString()}\n\nJika Anda tidak meminta perubahan ini, abaikan email ini.`,
+        html: `<p>Halo ${safeName},</p><p>Kami menerima permintaan untuk mengatur ulang kata sandi akun Anda.</p><p><a href="${escapeHtml(resetUrl.toString())}">Atur ulang kata sandi</a></p><p>Tautan berlaku selama ${PASSWORD_RESET_TOKEN_TTL_MINUTES} menit dan hanya dapat digunakan sekali. Jika Anda tidak meminta perubahan ini, abaikan email ini.</p>`,
+      });
+    } catch (error) {
+      await pool.execute('DELETE FROM password_reset_tokens WHERE user_id = ?', [user.id]);
+      console.error('Password reset email delivery failed:', error.code || error.name || 'unknown error');
+    }
+  }
+  res.status(202).json({
+    data: { message: 'Jika alamat email terdaftar, instruksi pemulihan akan dikirim.' },
+  });
+}));
+
+app.post('/api/auth/reset-password', asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!takeAuthRateLimit(req.ip || req.socket.remoteAddress || 'unknown')) {
+    return res.status(429).json({ error: 'Too many password reset attempts. Try again later.' });
+  }
+  const { token, new_password: newPassword } = req.body || {};
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token) || !validPassword(newPassword)) {
+    return res.status(400).json({ error: 'Provide a valid reset link and a password of 12 to 72 UTF-8 bytes' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      `SELECT reset.id, reset.user_id
+         FROM password_reset_tokens reset
+         JOIN users u ON u.id = reset.user_id
+        WHERE reset.token_hash = ? AND reset.used_at IS NULL
+          AND reset.expires_at > CURRENT_TIMESTAMP AND u.is_active = 1
+        LIMIT 1
+        FOR UPDATE`,
+      [hashPasswordResetToken(token)]
+    );
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Reset link is invalid or expired. Request a new link.' });
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await connection.execute(
+      `UPDATE users SET password_hash = ?, token_version = token_version + 1
+        WHERE id = ?`,
+      [passwordHash, rows[0].user_id]
+    );
+    await connection.execute(
+      'UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [rows[0].id]
+    );
+    await connection.execute(
+      'DELETE FROM password_reset_tokens WHERE user_id = ? AND id <> ?',
+      [rows[0].user_id, rows[0].id]
+    );
+    await connection.commit();
+    res.clearCookie(COOKIE_NAME, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+    });
+    res.json({ data: { message: 'Password updated. Sign in with your new password.' } });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }));
 
 app.post('/api/auth/logout', (req, res) => {
@@ -2694,6 +2888,8 @@ module.exports = {
   parseRequiredDocuments,
   canTransitionStatus,
   hashEmail,
+  hashPasswordResetToken,
+  takeAuthRateLimit,
   validPhoneNumber,
   validNationalId,
   validDepartment,

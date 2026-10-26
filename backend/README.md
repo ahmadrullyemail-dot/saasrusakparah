@@ -11,8 +11,10 @@ API SaaS HRD menggunakan Node.js, Express, dan MySQL. Data dipisahkan per tenant
 ## Menjalankan lokal
 
 1. Salin `.env.example` menjadi `.env`, lalu isi koneksi MySQL dan `JWT_SECRET` dengan nilai acak rahasia minimal 32 karakter.
-2. Pasang dependency: `npm install`.
-3. Jalankan API: `npm run dev` (atau `npm start`).
+2. Isi `FRONTEND_URL` dan konfigurasi SMTP untuk mengaktifkan pemulihan kata sandi. Gunakan port 465 dengan `SMTP_SECURE=true`, atau port submission TLS provider (umumnya 587) dengan `SMTP_SECURE=false`; set kredensial dan `SMTP_FROM` sesuai provider email.
+3. Jika API berada di belakang reverse proxy, set `TRUST_PROXY_HOPS` ke jumlah hop proxy tepercaya yang tepat agar pembatasan permintaan memakai IP klien dengan benar. Biarkan `0` saat API menerima koneksi langsung; jangan percayai header proxy dari hop yang tidak dikelola.
+4. Pasang dependency: `npm install`.
+5. Jalankan API: `npm run dev` (atau `npm start`).
 
 Saat startup, server menjalankan `CREATE DATABASE IF NOT EXISTS`, membuat tabel yang belum ada, serta menambahkan kolom akun/pekerja dan jenis dokumen yang diperlukan ke skema lama. Perubahan skema ini tidak menghapus data. Sintaks kolom generated untuk batas unik log presensi dipilih berdasarkan produk server (`PERSISTENT` pada MariaDB, `STORED` pada MySQL) agar kompatibel dengan versi MariaDB yang tidak menerima alias `STORED`. Tidak ada akun, tenant, pekerja, ataupun dokumen yang di-seed. Pengguna pertama membuat tenant dan akun admin melalui formulir pendaftaran. Email pengguna harus unik secara global sampai dukungan satu akun untuk beberapa tenant tersedia; indeks unik memakai hash SHA-256 biner agar tetap di bawah batas panjang kunci MySQL lama. Daftar jenis dokumen wajib disimpan sebagai JSON dalam kolom `LONGTEXT` agar kompatibel dengan MariaDB lama.
 
@@ -33,6 +35,8 @@ API berjalan di port 4000 secara default. Vite meneruskan `/api` dan `/socket.io
 
 - `GET /api/health`
 - `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
+- `POST /api/auth/forgot-password` — meminta email reset; jawaban selalu generik untuk mencegah enumerasi akun. Pengiriman membutuhkan SMTP dan `FRONTEND_URL`.
+- `POST /api/auth/reset-password` — menerima token sekali pakai dan kata sandi baru (12–72 byte UTF-8); token disimpan sebagai hash, berlaku 30 menit, dan perubahan mencabut semua sesi.
 - `PATCH /api/profile`, `POST /api/profile/photo`, `GET /api/profile/photo`, `PATCH /api/profile/password`
 - `GET /api/admin/users`, `POST /api/admin/users`, `PATCH /api/admin/users/:id`, `POST /api/admin/users/:id/reset-password` (Admin-only)
 - `GET /api/dashboard` — metrik status pekerja, dokumen yang perlu ditindaklanjuti, dan klaim presensi pending untuk tenant aktif

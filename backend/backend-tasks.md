@@ -21,10 +21,11 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [x] **Bangun profil dan keamanan akun** — Edit profil, unggah foto JPG/PNG tenant-scoped (signature divalidasi, batas 900 KiB agar kompatibel dengan `max_allowed_packet` MariaDB lama), ubah password terverifikasi, hash bcrypt, serta pencabutan sesi.
 - [x] **Bangun manajemen user tenant** — Admin dapat membuat user, mengubah role/status, dan mereset password dengan pembatasan tenant serta proteksi admin terakhir.
 - [x] **Bangun katalog jenis dokumen dinamis** — Katalog per tenant dimulai kosong; Admin dapat tambah/edit/nonaktifkan jenis, dan form pekerja serta pencatatan dokumen menggunakan katalog aktif.
+- [x] **Pulihkan kata sandi dengan token email** — Endpoint meminta tautan secara generik agar tidak mengungkap akun, menyimpan hash token sekali pakai selama 30 menit, mengirim melalui SMTP, membatasi permintaan, dan mencabut sesi setelah password baru disimpan.
 - [ ] **Validasi startup dan endpoint dengan database aktif** — Jalankan API terhadap MySQL/MariaDB yang digunakan, verifikasi database/tabel dibuat otomatis dan semua alur MVP berfungsi.
 - [x] **Tambahkan pengujian unit backend** — Uji kelayakan dokumen, tanggal, persyaratan wajib, dan transisi status.
 - [ ] **Lengkapi pengujian integrasi backend** — Uji API/authentication, otomatisasi bootstrap schema, dan isolasi tenant dengan MySQL aktif.
-- [ ] **Tentukan hardening produksi** — Putuskan migrasi skema berversi, undangan/reset password via email, retensi audit trail, backup, dan aturan operasional yang belum disepakati.
+- [ ] **Tentukan hardening produksi** — Putuskan migrasi skema berversi, undangan, retensi audit trail, backup, dan aturan operasional yang belum disepakati.
 
 ## P1 — Pengembangan lanjutan
 

@@ -11,6 +11,8 @@ const {
   parseRequiredDocuments,
   canTransitionStatus,
   hashEmail,
+  hashPasswordResetToken,
+  takeAuthRateLimit,
   validPhoneNumber,
   validNationalId,
   validDepartment,
@@ -222,6 +224,24 @@ test('email hashes are normalized and use a fixed-size binary key', () => {
   assert.equal(normalized.length, 32);
   assert.deepEqual(normalized, hashEmail(' hr@EXAMPLE.com '));
   assert.notDeepEqual(normalized, hashEmail('other@example.com'));
+});
+
+test('password reset tokens are stored as fixed-size one-way hashes', () => {
+  const tokenHash = hashPasswordResetToken('random-reset-token');
+
+  assert.equal(tokenHash.length, 32);
+  assert.deepEqual(tokenHash, hashPasswordResetToken('random-reset-token'));
+  assert.notDeepEqual(tokenHash, hashPasswordResetToken('different-reset-token'));
+});
+
+test('public auth endpoints have a bounded per-address request window', () => {
+  const address = `test-${Date.now()}-${Math.random()}`;
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    assert.equal(takeAuthRateLimit(address, 1000), true);
+  }
+  assert.equal(takeAuthRateLimit(address, 1000), false);
+  assert.equal(takeAuthRateLimit(address, 1000 + 15 * 60 * 1000), true);
 });
 
 test('account passwords follow the minimum length and bcrypt byte limits', () => {

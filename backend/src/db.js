@@ -64,6 +64,18 @@ async function initializeDatabase() {
       UNIQUE KEY uq_users_email_hash (email_hash),
       CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      user_id BIGINT UNSIGNED NOT NULL,
+      token_hash BINARY(32) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      used_at DATETIME NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_password_reset_token_hash (token_hash),
+      KEY ix_password_reset_user_created (user_id, created_at),
+      KEY ix_password_reset_expiry (expires_at),
+      CONSTRAINT fk_password_reset_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS audit_events (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       tenant_id BIGINT UNSIGNED NOT NULL,

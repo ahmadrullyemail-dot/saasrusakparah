@@ -1,4 +1,5 @@
 import { attendanceMonthLabel, attendanceMonthSummary, attendanceStatusLabel, formatAttendanceTime, formatCoordinate, monthlyAttendanceCode } from '../lib/hrd.js';
+import { Icon } from './Icon.jsx';
 
 export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLinks, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, createAttendanceLink, copyAttendanceLink, decideAttendanceRequest, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, reviewingAttendance, saveAttendanceStatus, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance, revokeAttendanceLink }) {
   return (
@@ -26,19 +27,19 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
           </div>
           <div className="attendance-metric-grid">
             <article className="attendance-metric-card">
-              <span className="attendance-metric-icon active-workers">P</span>
+              <span className="attendance-metric-icon active-workers"><Icon name="users" /></span>
               <div><small>Pegawai aktif</small><strong>{monthlyAttendanceLoading ? '—' : monthlyWorkerRows.length}</strong><span>Terdaftar pada perusahaan</span></div>
             </article>
             <article className="attendance-metric-card">
-              <span className="attendance-metric-icon checkin-workers">H</span>
+              <span className="attendance-metric-icon checkin-workers"><Icon name="checkCircle" /></span>
               <div><small>Tercatat masuk</small><strong>{monthlyAttendanceLoading ? '—' : monthlyCheckedIns}</strong><span>{attendanceMonthLabel(attendanceMonth)}</span></div>
             </article>
             <article className="attendance-metric-card">
-              <span className="attendance-metric-icon total-logs">Σ</span>
+              <span className="attendance-metric-icon total-logs"><Icon name="history" /></span>
               <div><small>Total log presensi</small><strong>{monthlyAttendanceLoading ? '—' : totalMonthlyLogs}</strong><span>{attendanceMonthLabel(attendanceMonth)}</span></div>
             </article>
             <article className="attendance-metric-card">
-              <span className="attendance-metric-icon pending-claims">!</span>
+              <span className="attendance-metric-icon pending-claims"><Icon name="clock" /></span>
               <div><small>Klaim pending</small><strong>{monthlyAttendanceLoading ? '—' : pendingAttendanceApprovals.length}</strong><span>Menunggu tinjauan HR</span></div>
             </article>
           </div>
@@ -183,7 +184,7 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
             </div>
           </section>
 
-          <div className="panel-heading attendance-heading" id="attendance-daily-operations">
+          {/*<div className="panel-heading attendance-heading" id="attendance-daily-operations">
             <div><p className="eyebrow">OPERASIONAL HARIAN</p><h2>Presensi · {attendanceDate}</h2></div>
             <label className="attendance-date-field attendance-date-secondary">Atau pilih tanggal
               <input
@@ -196,7 +197,7 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
                 }}
               />
             </label>
-          </div>
+          </div>*/}
           <p className="muted attendance-link-note">Tautan statis adalah kredensial pribadi pekerja. Tombol Tampilkan link tidak mengubahnya; hanya rotasi salt perusahaan yang membatalkan semua link.</p>
           <p className="muted attendance-link-note">Koordinat berasal dari browser perangkat dan tidak membuktikan lokasi secara anti-spoofing.</p>
           {!attendanceSettings.salt_configured && <p className="attendance-salt-warning">Pengaturan salt belum dibuat. Minta Admin perusahaan mengaktifkannya melalui Pengaturan → Pengaturan Presensi.</p>}
@@ -240,8 +241,8 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
                                 Lihat bukti
                               </a>
                             )}
-                            <button className="button primary" type="button" onClick={() => decideAttendanceRequest(record.worker_id, 'approve')}>Setujui</button>
-                            <button className="button danger" type="button" onClick={() => decideAttendanceRequest(record.worker_id, 'reject')}>Tolak</button>
+                            <button className="button primary" type="button" onClick={() => decideAttendanceRequest(record.worker_id, 'approve')}><Icon name="check" size={16} />Setujui</button>
+                            <button className="button danger" type="button" onClick={() => decideAttendanceRequest(record.worker_id, 'reject')}><Icon name="x" size={16} />Tolak</button>
                           </div>
                         ) : record.approval_status === 'approved' || record.approval_status === 'rejected' ? (
                           <span className={`readiness ${record.approval_status === 'approved' ? 'ready' : 'needs-work'}`}>
@@ -321,7 +322,7 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
                     <h2 id="attendance-review-title">Tinjau klaim presensi</h2>
                     <p className="muted uppercase-text">{reviewingAttendance.full_name} · {reviewingAttendance.position}</p>
                   </div>
-                  <button className="modal-close" type="button" aria-label="Tutup tinjauan" disabled={busy} onClick={() => setReviewingAttendance(null)}>×</button>
+                  <button className="modal-close" type="button" aria-label="Tutup tinjauan" disabled={busy} onClick={() => setReviewingAttendance(null)}><Icon name="x" /></button>
                 </header>
                 <div className="attendance-review-summary">
                   <span className="attendance-type-badge">{attendanceStatusLabel(reviewingAttendance.status)}</span>
@@ -347,7 +348,7 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
                     onClick={async () => {
                       if (await decideAttendanceRequest(reviewingAttendance.worker_id, 'reject', reviewingAttendance.attendance_date)) setReviewingAttendance(null);
                     }}
-                  >Tolak</button>
+                  ><Icon name="x" size={16} />Tolak</button>
                   <button
                     className="button primary"
                     type="button"
@@ -355,7 +356,7 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
                     onClick={async () => {
                       if (await decideAttendanceRequest(reviewingAttendance.worker_id, 'approve', reviewingAttendance.attendance_date)) setReviewingAttendance(null);
                     }}
-                  >Setujui</button>
+                  ><Icon name="check" size={16} />Setujui</button>
                 </div>
               </section>
             </div>

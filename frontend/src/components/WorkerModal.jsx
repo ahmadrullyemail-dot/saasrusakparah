@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { CONTRACT_TYPES } from '../config.js';
+import { Icon } from './Icon.jsx';
 
 export function WorkerModal({ onClose, onSubmit, busy, error, departmentOptions, documentTypes, documentTypesLoading, initialWorker = null }) {
   const nameInputRef = useRef(null);
@@ -58,7 +59,7 @@ export function WorkerModal({ onClose, onSubmit, busy, error, departmentOptions,
             <p className="muted">{initialWorker ? 'Perbarui data personal dan penempatan pekerja.' : 'Catat data awal pekerja dan dokumen wajib untuk posisinya.'}</p>
           </div>
           <button className="modal-close" type="button" aria-label="Tutup modal" onClick={onClose} disabled={busy}>
-            ×
+            <Icon name="x" />
           </button>
         </header>
         <form className="worker-form" onSubmit={onSubmit}>

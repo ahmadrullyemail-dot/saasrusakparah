@@ -8,7 +8,7 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 
 - [x] **Siapkan React + Vite** — Kerangka aplikasi, proxy API untuk pengembangan, dan layout responsif.
 - [x] **Bangun autentikasi perusahaan** — Form registrasi perusahaan/login yang memakai sesi cookie HttpOnly dari backend.
-- [x] **Bangun dashboard status worker** — Ringkasan offering, pra-aktif, aktif, nonaktif, serta jumlah dokumen yang segera kedaluwarsa.
+- [x] **Bangun dashboard status worker** — Ringkasan offering, pra-aktif, aktif, nonaktif, serta jumlah dokumen yang segera kedaluwarsa; widget Tindak Lanjut Dokumen menampilkan hingga lima dokumen terdekat dengan nama pekerja, ambang efektif per jenis, tanggal berakhir, dan tautan ke profil/dokumen. Widget Pusat Persetujuan menampilkan jumlah klaim presensi pending dan tautan ke panel presensi.
 - [x] **Bangun riwayat aktivitas** — Feed audit terbaru tenant untuk Admin/HR Staff dengan aktor, role, waktu, aksi, dan ringkasan perubahan.
 - [x] **Bangun daftar dan formulir pekerja** — Filter status serta pencatatan pekerja setelah offering dan pilihan dokumen wajib.
 - [x] **Tambah impor/ekspor dan aksi Admin** — Impor Excel diproses hanya di browser, ekspor `.xlsx`, duplikasi nama/NIK dilewati, edit/delete hanya untuk Admin.
@@ -25,9 +25,13 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 ## P1 — Pengembangan lanjutan
 
 - [x] **Bangun landing page dan autentikasi** — Halaman root menampilkan brand rusakparah.web.id, navigasi, ringkasan fitur, ilustrasi preview statis, dan form login/registrasi yang tetap terhubung ke API autentikasi.
+- [x] **Tambah navigasi dan riwayat changelog** — Landing page memiliki tautan Changelog dengan rilis dan fitur yang sudah tersedia dalam urutan terbaru ke fondasi produk.
+- [x] **Tambah pemulihan kata sandi** — Form lupa kata sandi mengirim permintaan generik melalui API dan tautan reset membuka form kata sandi baru.
 - [x] **Tampilkan paket dan kuota Free** — Dashboard/Data Pekerja memperlihatkan penggunaan kuota 20 pekerja aktif; Pengaturan menampilkan paket Free serta Pro/Enterprise sebagai belum tersedia tanpa aksi upgrade.
 - [x] **Sinkronkan UI secara real-time** — Socket.IO memicu pemuatan ulang data ringkasan, pekerja, presensi, pengaturan, dan riwayat sesuai panel yang aktif; Ringkasan dan History juga memiliki refresh berkala 15 detik.
 - [x] **Sediakan pilihan tema lokal** — Standard, Dark, dan Compact/Clean disimpan per browser.
+- [x] **Rapikan sistem visual dan responsivitas** — Terapkan tipografi Inter dengan fallback sistem lokal, hierarki teks, whitespace, kartu/bentuk tombol konsisten, status soft-badge, pencarian dokumen yang jelas, dan breakpoint mobile tanpa menambah framework styling baru.
+- [x] **Standarkan ikon antarmuka** — Gunakan Lucide React dengan gaya outline dan ukuran konsisten pada navigasi, dashboard, landing page, aksi utama, status, menu pengaturan, dan portal presensi; kontrol ikon-only tetap memiliki nama aksesibel.
 - [x] **Bangun halaman dan rekap presensi** — Halaman mobile `Presensi.jsx` dengan profil, jam WIB realtime, log hari ini, riwayat 30 hari, navigasi bawah, link HMAC statis, check-in/out geolokasi, rekap HRD, dan pengaturan salt Admin.
 - [x] **Kelola geofence dan persetujuan presensi** — Peta Leaflet lokasi/radius/checkbox aktivitas, pengajuan Dinas dengan bukti gambar, serta tindakan persetujuan HR di rekap.
 - [x] **Tambah Anti-Mock Location best-effort** — Switch Admin dan pemeriksaan mock flag, akurasi, serta kecepatan di portal; batas deteksi browser dijelaskan pada UI.

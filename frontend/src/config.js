@@ -13,12 +13,12 @@ export const STATUS_LABELS = {
 };
 
 export const NAVIGATION_TABS = [
-  { id: 'overview', label: 'Ringkasan', icon: '⌂' },
-  { id: 'workers', label: 'Data pekerja', icon: '♙' },
-  { id: 'documents', label: 'Dokumen & masa berlaku', icon: '▤' },
-  { id: 'attendance', label: 'Presensi', icon: '◷' },
-  { id: 'history', label: 'Riwayat aktivitas', icon: '↺', managerOnly: true },
-  { id: 'settings', label: 'Pengaturan', icon: '⚙' },
+  { id: 'overview', label: 'Ringkasan', icon: 'dashboard' },
+  { id: 'workers', label: 'Data pekerja', icon: 'users' },
+  { id: 'documents', label: 'Dokumen & masa berlaku', icon: 'fileClock' },
+  { id: 'attendance', label: 'Presensi', icon: 'calendarClock' },
+  { id: 'history', label: 'Riwayat aktivitas', icon: 'history', managerOnly: true },
+  { id: 'settings', label: 'Pengaturan', icon: 'settings' },
 ];
 
 export const APP_THEMES = [

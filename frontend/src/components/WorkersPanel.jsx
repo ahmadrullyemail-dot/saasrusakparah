@@ -1,4 +1,5 @@
 import { StatusBadge } from './StatCard.jsx';
+import { Icon } from './Icon.jsx';
 
 export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkbook, filter, handleImportWorkers, openEditWorker, selectedId, setFilter, setSelectedId, setWorkerSearch, showError, subscription, user, visibleWorkers, workerImportInputRef, workerImportResult, workerQuotaFull, workerSearch, workers }) {
   return (
@@ -15,16 +16,20 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
               <span className="count-pill">{workers.length} pekerja</span>
             </div>
             <div className="worker-list-tools">
-              <label className="worker-search-field">
-                <span className="visually-hidden">Cari pekerja</span>
-                <input
-                  type="search"
-                  value={workerSearch}
-                  onChange={(event) => setWorkerSearch(event.target.value)}
-                  placeholder="Cari nama, NIK, posisi, departemen..."
-                  aria-label="Cari pekerja"
-                />
-              </label>
+              <div className="worker-search-field">
+                <label className="visually-hidden" htmlFor="worker-search">Cari pekerja</label>
+                <span className="worker-search-control">
+                  <input
+                    id="worker-search"
+                    type="search"
+                    value={workerSearch}
+                    onChange={(event) => setWorkerSearch(event.target.value)}
+                    placeholder="Cari nama, NIK, posisi, departemen..."
+                    aria-label="Cari pekerja"
+                  />
+                  {workerSearch && <button type="button" onClick={() => setWorkerSearch('')} aria-label="Hapus pencarian"><Icon name="x" size={16} /></button>}
+                </span>
+              </div>
               {user.role === 'admin' && (
                 <div className="worker-import-tools">
                   <input
@@ -38,9 +43,9 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                       if (file) handleImportWorkers(file);
                     }}
                   />
-                  <button className="button secondary" type="button" disabled={busy} onClick={() => createWorkerWorkbook([]).catch(showError)}>Unduh template Excel</button>
+                  <button className="button secondary" type="button" disabled={busy} onClick={() => createWorkerWorkbook([]).catch(showError)}><Icon name="download" size={16} /> Unduh template Excel</button>
                   <button className="button secondary" type="button" disabled={busy || workerQuotaFull} onClick={() => workerImportInputRef.current?.click()}>
-                    {busy ? 'Memproses…' : 'Impor Excel'}
+                    <Icon name="upload" size={16} /> {busy ? 'Memproses…' : 'Impor Excel'}
                   </button>
                   <button
                     className="button secondary"
@@ -62,7 +67,7 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                       required_document_types: (worker.required_document_types || []).join(','),
                     }))).catch(showError)}
                   >
-                    Ekspor Excel
+                    <Icon name="download" size={16} /> Ekspor Excel
                   </button>
                 </div>
               )}
@@ -96,10 +101,11 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                 ['active', 'Aktif'],
                 ['inactive', 'Nonaktif'],
               ].map(([value, label]) => (
-                <button key={value} className={`filter-chip ${filter === value ? 'selected' : ''}`} onClick={() => setFilter(value)}>
-                  {label}
+                <button key={value} className={`filter-chip ${filter === value ? 'selected' : ''}`} aria-pressed={filter === value} onClick={() => setFilter(value)}>
+                  {label}<span>{value === 'all' ? workers.length : workers.filter((worker) => worker.status === value).length}</span>
                 </button>
               ))}
+              <span className="worker-result-count" role="status">{visibleWorkers.length} ditampilkan</span>
             </div>
             <div className="table-wrap">
               <table>
@@ -114,8 +120,8 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                       {user.role === 'admin' && (
                         <td>
                           <div className="user-actions">
-                            <button className="button secondary small-action" type="button" disabled={busy} onClick={() => openEditWorker(worker)}>Edit</button>
-                            <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveWorker(worker.id)}>Delete</button>
+                            <button className="button secondary small-action" type="button" disabled={busy} onClick={() => openEditWorker(worker)}><Icon name="pencil" size={15} /> Edit</button>
+                            <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveWorker(worker.id)}><Icon name="archive" size={15} /> Arsipkan</button>
                           </div>
                         </td>
                       )}
