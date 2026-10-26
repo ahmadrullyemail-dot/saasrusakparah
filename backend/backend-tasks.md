@@ -7,7 +7,7 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 ## P0 — MVP
 
 - [x] **Tetapkan alur worker** — `offered` → `preactive` → `active` atau `inactive`; Admin mengubah status dan dapat menjadwalkan tanggal efektif nonaktif, dengan reaktivasi dari nonaktif.
-- [x] **Definisikan persyaratan dokumen awal** — MCU, PKWT, sertifikasi, dan SIM didukung; persyaratan dapat dipilih per pekerja. Default awal MCU + PKWT; MCU/PKWT/SIM memerlukan tanggal kedaluwarsa untuk memenuhi syarat.
+- [x] **Definisikan persyaratan dokumen awal** — Jenis dokumen dikelola melalui katalog per tenant yang dimulai kosong; Admin menentukan jenis dan dokumen wajib per pekerja. MCU, PKWT, sertifikasi, dan SIM dapat dibuat sebagai jenis dokumen, bukan pilihan bawaan sistem. Tanggal kedaluwarsa digunakan sesuai konfigurasi jenis dan aturan kelayakan.
 - [x] **Pilih stack dan database** — Node.js + Express + MySQL/MariaDB; database/tabel dibuat saat startup jika belum ada, tanpa seed/mock data.
 - [x] **Bangun autentikasi tenant awal** — Pendaftaran perusahaan membuat tenant dan akun admin; cookie sesi HttpOnly dan query data dibatasi tenant.
 - [x] **Buat kontrak API MVP** — Registrasi/login, dashboard, daftar/detail pekerja, kelayakan, pencatatan dokumen, dan perubahan status.
@@ -20,7 +20,7 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [x] **Batasi penyimpanan data MCU** — Simpan metadata dan status dokumen saja, bukan hasil medis rinci.
 - [x] **Bangun profil dan keamanan akun** — Edit profil, unggah foto JPG/PNG tenant-scoped (signature divalidasi, batas 900 KiB agar kompatibel dengan `max_allowed_packet` MariaDB lama), ubah password terverifikasi, hash bcrypt, serta pencabutan sesi.
 - [x] **Bangun manajemen user tenant** — Admin dapat membuat user, mengubah role/status, dan mereset password dengan pembatasan tenant serta proteksi admin terakhir.
-- [x] **Bangun katalog jenis dokumen dinamis** — Katalog per tenant, pilihan bawaan, tambah/edit/nonaktif, serta penggunaan katalog aktif pada form worker dan pencatatan dokumen.
+- [x] **Bangun katalog jenis dokumen dinamis** — Katalog per tenant dimulai kosong; Admin dapat tambah/edit/nonaktifkan jenis, dan form pekerja serta pencatatan dokumen menggunakan katalog aktif.
 - [ ] **Validasi startup dan endpoint dengan database aktif** — Jalankan API terhadap MySQL/MariaDB yang digunakan, verifikasi database/tabel dibuat otomatis dan semua alur MVP berfungsi.
 - [x] **Tambahkan pengujian unit backend** — Uji kelayakan dokumen, tanggal, persyaratan wajib, dan transisi status.
 - [ ] **Lengkapi pengujian integrasi backend** — Uji API/authentication, otomatisasi bootstrap schema, dan isolasi tenant dengan MySQL aktif.
@@ -28,6 +28,8 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 
 ## P1 — Pengembangan lanjutan
 
+- [x] **Terapkan paket dan kuota pekerja** — Paket Free menjadi default tenant dan membatasi 20 pekerja berstatus aktif yang tidak diarsipkan. API subscription menyajikan paket/pemakaian; backend menolak penambahan manual/impor saat kuota sudah penuh dan menolak aktivasi yang melampaui kuota.
+- [x] **Tambahkan sinkronisasi real-time tenant** — Socket.IO berjalan pada HTTP server Express, memvalidasi sesi cookie dan tenant dari database, mengirim event metadata setelah perubahan berhasil, serta memeriksa validitas sesi secara berkala.
 - [x] **Bangun presensi pekerja** — Salt tenant dan link HMAC statis, validasi worker aktif/tenant, check-in/out dengan geolokasi tervalidasi, status izin/sakit/tidak hadir, dan rekap HRD per tanggal.
 - [x] **Tambahkan geofence dan approval presensi** — Lokasi tenant, aturan aktivitas/radius dengan validasi Haversine server-side, pengajuan Off/Izin/Cuti/Sakit, bukti Dinas JPG/PNG di MySQL, dan persetujuan HR.
 - [x] **Tambahkan Anti-Mock Location best-effort** — Preferensi tenant Admin, validasi sinyal mock/akurasi/kecepatan request dan pemeriksaan lompatan lokasi terhadap riwayat; bukan GPS attestation dan perlu aplikasi native untuk jaminan kuat.

@@ -24,6 +24,10 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 
 ## P1 — Pengembangan lanjutan
 
+- [x] **Bangun landing page dan autentikasi** — Halaman root menampilkan brand rusakparah.web.id, navigasi, ringkasan fitur, ilustrasi preview statis, dan form login/registrasi yang tetap terhubung ke API autentikasi.
+- [x] **Tampilkan paket dan kuota Free** — Dashboard/Data Pekerja memperlihatkan penggunaan kuota 20 pekerja aktif; Pengaturan menampilkan paket Free serta Pro/Enterprise sebagai belum tersedia tanpa aksi upgrade.
+- [x] **Sinkronkan UI secara real-time** — Socket.IO memicu pemuatan ulang data ringkasan, pekerja, presensi, pengaturan, dan riwayat sesuai panel yang aktif; Ringkasan dan History juga memiliki refresh berkala 15 detik.
+- [x] **Sediakan pilihan tema lokal** — Standard, Dark, dan Compact/Clean disimpan per browser.
 - [x] **Bangun halaman dan rekap presensi** — Halaman mobile `Presensi.jsx` dengan profil, jam WIB realtime, log hari ini, riwayat 30 hari, navigasi bawah, link HMAC statis, check-in/out geolokasi, rekap HRD, dan pengaturan salt Admin.
 - [x] **Kelola geofence dan persetujuan presensi** — Peta Leaflet lokasi/radius/checkbox aktivitas, pengajuan Dinas dengan bukti gambar, serta tindakan persetujuan HR di rekap.
 - [x] **Tambah Anti-Mock Location best-effort** — Switch Admin dan pemeriksaan mock flag, akurasi, serta kecepatan di portal; batas deteksi browser dijelaskan pada UI.
@@ -31,9 +35,10 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [ ] **Tambah pengingat dan filter masa berlaku** — Setelah aturan waktu tindak lanjut disepakati.
 - [ ] **Tambah undangan dan izin terperinci** — Lengkapi manajemen MVP dengan proses undangan dan matriks izin yang lebih granular.
 - [ ] **Tambah perubahan persyaratan per posisi/client** — Ikuti konfigurasi persyaratan yang disepakati.
+- [ ] **Lanjutkan pemecahan modul frontend** — Komponen autentikasi, pekerja, presensi, pengaturan, peta, dan kartu metrik sudah dipisah; `App.jsx` masih mengorkestrasi state dan alur data utama sehingga ekstraksi lanjutan perlu menjaga perilaku lintas fitur.
 
 ## Catatan
 
-- Aplikasi menampilkan data dari API saja; tidak ada worker/dokumen contoh.
+- Data operasional berasal dari API dan tidak memakai seed worker/dokumen. Angka di ilustrasi landing page adalah preview statis, bukan data perusahaan.
 - Jangan tampilkan hasil MCU atau informasi medis rinci.
 - Validasi build/test dilakukan dengan perintah yang tercantum dalam `README.md`.
