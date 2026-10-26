@@ -1,7 +1,8 @@
-require('dotenv').config();
-
 const crypto = require('node:crypto');
 const http = require('node:http');
+const path = require('node:path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -146,6 +147,40 @@ async function recordAudit(req, { action, entityType, entityId = null, descripti
       String(description).slice(0, 1000),
     ]
   );
+}
+
+async function getTenantSubscription(connection, tenantId, lock = false) {
+  const [tenantRows] = await connection.execute(
+    `SELECT subscription_plan FROM tenants WHERE id = ?${lock ? ' FOR UPDATE' : ''}`,
+    [tenantId]
+  );
+  if (!tenantRows.length) throw new Error('Tenant subscription record not found');
+  const [workerRows] = await connection.execute(
+    `SELECT COUNT(*) AS active_workers
+       FROM workers
+      WHERE tenant_id = ? AND status = 'active' AND deleted_at IS NULL`,
+    [tenantId]
+  );
+  const plan = tenantRows[0].subscription_plan;
+  return {
+    plan,
+    active_workers: Number(workerRows[0].active_workers),
+    worker_limit: plan === 'free' ? 20 : null,
+  };
+}
+
+function workerQuotaExceeded(res, subscription) {
+  return res.status(409).json({
+    error: `Paket Free dibatasi maksimal ${subscription.worker_limit} pekerja aktif. Kuota saat ini ${subscription.active_workers}/${subscription.worker_limit}.`,
+    code: 'WORKER_QUOTA_EXCEEDED',
+    plan: subscription.plan,
+    active_workers: subscription.active_workers,
+    worker_limit: subscription.worker_limit,
+  });
+}
+
+function exceedsWorkerQuota(subscription) {
+  return subscription.worker_limit != null && subscription.active_workers >= subscription.worker_limit;
 }
 
 function requireAuth(req, res, next) {
@@ -1598,6 +1633,10 @@ app.get('/api/dashboard', asyncRoute(async (req, res) => {
   res.json({ data: summary });
 }));
 
+app.get('/api/subscription', asyncRoute(async (req, res) => {
+  res.json({ data: await getTenantSubscription(pool, req.auth.tenantId) });
+}));
+
 app.get('/api/admin/document-settings', requireAdmin, asyncRoute(async (req, res) => {
   const [rows] = await pool.execute(
     `SELECT warning_threshold_days, updated_at
@@ -1983,6 +2022,11 @@ app.post('/api/workers', requireManager, asyncRoute(async (req, res) => {
   let workerId;
   try {
     await connection.beginTransaction();
+    const subscription = await getTenantSubscription(connection, req.auth.tenantId, true);
+    if (exceedsWorkerQuota(subscription)) {
+      await connection.rollback();
+      return workerQuotaExceeded(res, subscription);
+    }
     const normalizedDepartment = normalizeText(department);
     await connection.execute(
       `INSERT INTO departments (tenant_id, name, name_hash)
@@ -2063,6 +2107,13 @@ app.post('/api/admin/workers/import', requireAdmin, asyncRoute(async (req, res) 
   const errors = [];
   const connection = await pool.getConnection();
   try {
+    await connection.beginTransaction();
+    const subscription = await getTenantSubscription(connection, req.auth.tenantId, true);
+    if (exceedsWorkerQuota(subscription)) {
+      await connection.rollback();
+      return workerQuotaExceeded(res, subscription);
+    }
+    await connection.commit();
     for (const [index, row] of importRows.entries()) {
       const rowNumber = index + 2;
       if (!row || typeof row !== 'object' || Array.isArray(row)) {
@@ -2386,15 +2437,19 @@ app.delete('/api/workers/:id/documents/:documentId', requireAdmin, asyncRoute(as
 }));
 
 app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) => {
+  const { status, effective_date: effectiveDate } = req.body || {};
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+    let subscription;
+    if (status === 'active') {
+      subscription = await getTenantSubscription(connection, req.auth.tenantId, true);
+    }
     const worker = await getWorker(req.auth.tenantId, req.params.id, connection, true);
     if (!worker) {
       await connection.rollback();
       return res.status(404).json({ error: 'Worker not found' });
     }
-    const { status, effective_date: effectiveDate } = req.body || {};
     const [todayRows] = await connection.execute("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today");
     if (status === 'inactive' && effectiveDate != null && !validDate(effectiveDate)) {
       await connection.rollback();
@@ -2408,6 +2463,10 @@ app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) =
       || !canTransitionStatus(worker.status, status)) {
       await connection.rollback();
       return res.status(400).json({ error: 'Status transition is not allowed' });
+    }
+    if (status === 'active' && exceedsWorkerQuota(subscription)) {
+      await connection.rollback();
+      return workerQuotaExceeded(res, subscription);
     }
     if (status === 'inactive' && effectiveDate && effectiveDate > todayRows[0].today) {
       await connection.execute(
@@ -2657,6 +2716,7 @@ module.exports = {
   validAttendanceLocationInput,
   requireManager,
   requireAdmin,
+  exceedsWorkerQuota,
   applyScheduledInactivations,
   initializeDatabase,
   pool,

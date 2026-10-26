@@ -43,6 +43,7 @@ async function initializeDatabase() {
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(150) NOT NULL,
       slug VARCHAR(170) NOT NULL UNIQUE,
+      subscription_plan ENUM('free', 'pro', 'enterprise') NOT NULL DEFAULT 'free',
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS users (
@@ -320,6 +321,16 @@ async function initializeDatabase() {
     `UPDATE users SET full_name = SUBSTRING_INDEX(email, '@', 1)
       WHERE full_name IS NULL OR TRIM(full_name) = ''`
   );
+  const [tenantColumns] = await pool.execute(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'tenants'`,
+    [databaseName]
+  );
+  if (!tenantColumns.some(({ COLUMN_NAME }) => COLUMN_NAME === 'subscription_plan')) {
+    await pool.query(
+      "ALTER TABLE tenants ADD COLUMN subscription_plan ENUM('free', 'pro', 'enterprise') NOT NULL DEFAULT 'free'"
+    );
+  }
   for (const [table, columns] of [
     ['users', ['full_name']],
     ['tenants', ['name']],

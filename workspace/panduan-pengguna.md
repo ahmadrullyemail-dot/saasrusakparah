@@ -14,6 +14,7 @@ Versi dokumen: 1.0 · Diperbarui: 25 Oktober 2026
 4. [Peran dan hak akses](#4-peran-dan-hak-akses)
 5. [Ringkasan / Dashboard](#5-ringkasan--dashboard)
 6. [Manajemen pekerja](#6-manajemen-pekerja)
+   - [Kuota paket Free](#65-kuota-paket-free)
 7. [Presensi, matriks bulanan, dan pusat persetujuan](#7-presensi-matriks-bulanan-dan-pusat-persetujuan)
 8. [Portal Presensi Pekerja](#8-portal-presensi-pekerja)
 9. [Dokumen dan masa berlaku](#9-dokumen-dan-masa-berlaku)
@@ -146,6 +147,12 @@ Impor menerima maksimal **500 baris**. Baris duplikat berdasarkan **nama, NIK, a
 **Ekspor**
 
 Pilih **Ekspor Excel** untuk mengunduh data pekerja yang tersedia dalam daftar saat ini.
+
+### 6.5 Kuota paket Free
+
+Paket **Free** membatasi perusahaan hingga **20 pekerja aktif**. Pemakaian kuota ditampilkan pada Ringkasan dan Data Pekerja, misalnya `12/20 Pekerja`. Pekerja berstatus Offering, Pra-aktif, atau Nonaktif tidak dihitung sebagai pekerja aktif. Saat kuota penuh, penambahan pekerja manual, impor Excel, dan aktivasi pekerja baru ditolak oleh backend. Arsipkan atau nonaktifkan pekerja aktif sesuai prosedur perusahaan untuk menyediakan kembali kuota.
+
+Pada Pengaturan → **Paket Langganan**, Admin dapat melihat paket dan pemakaian kuota. Paket **Pro** dan **Enterprise** berstatus **Segera Hadir** dan tombolnya belum dapat digunakan.
 
 > [Placeholder screenshot — Kontrol pencarian, filter, impor, ekspor, dan aksi pekerja]
 >

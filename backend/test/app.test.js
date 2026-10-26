@@ -35,7 +35,15 @@ const {
   validAttendanceLocationInput,
   requireManager,
   requireAdmin,
+  exceedsWorkerQuota,
 } = require('../src/app');
+
+test('Free worker quota blocks at 20 active workers and leaves other plans uncapped', () => {
+  assert.equal(exceedsWorkerQuota({ plan: 'free', active_workers: 19, worker_limit: 20 }), false);
+  assert.equal(exceedsWorkerQuota({ plan: 'free', active_workers: 20, worker_limit: 20 }), true);
+  assert.equal(exceedsWorkerQuota({ plan: 'free', active_workers: 21, worker_limit: 20 }), true);
+  assert.equal(exceedsWorkerQuota({ plan: 'pro', active_workers: 200, worker_limit: null }), false);
+});
 
 test('RBAC grants operational create access to Admin and HR Staff only', () => {
   for (const role of ['admin', 'hr_manager']) {

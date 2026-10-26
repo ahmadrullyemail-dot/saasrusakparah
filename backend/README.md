@@ -22,7 +22,7 @@ Bootstrap ini untuk database baru dan tidak mengubah skema/tabel yang sudah ada.
 
 Admin dapat membuat akun tenant melalui Pengaturan; role yang tersedia adalah Admin, HR Staff (`hr_manager`), dan Viewer. User mengelola nama, foto profil JPG/PNG (maksimal 900 KiB setelah kompresi browser), dan passwordnya sendiri. Batas foto menjaga nilai BLOB di bawah `max_allowed_packet` MariaDB lama yang dapat membatasi data tersimpan maupun ekspresi BLOB; foto dilayani melalui endpoint yang memerlukan sesi. Password minimum 12 karakter dan maksimum 72 byte UTF-8, disimpan sebagai bcrypt hash; perubahan password mencabut sesi lain. Email akun tetap unik global pada MVP, sehingga satu email tidak dapat dipakai untuk tenant lain.
 
-Untuk deployment, gunakan HTTPS dan frontend/API pada site yang sama (atau reverse proxy), set `NODE_ENV=production`, `CORS_ORIGIN` ke origin frontend yang tepat, serta ganti secret contoh dengan secret acak yang tidak disimpan di repository.
+Untuk deployment, gunakan HTTPS dan frontend/API pada site yang sama (atau reverse proxy), set `NODE_ENV=production`, `CORS_ORIGIN` ke origin frontend yang tepat, serta ganti secret contoh dengan secret acak yang tidak disimpan di repository. Simpan konfigurasi server dalam `backend/.env` di VM; aplikasi memuat file tersebut berdasarkan lokasi source backend sehingga tidak bergantung pada working directory PM2. `JWT_SECRET` harus memiliki setidaknya 32 byte acak dan wajib dipertahankan stabil setelah deployment karena rotasi akan membatalkan sesi dan seluruh tautan presensi yang sudah dibagikan. Jangan commit file `.env`.
 Hosting frontend produksi harus mengarahkan fallback SPA untuk path `/presensi` ke `index.html`, sementara path `/api` diteruskan ke Express.
 
 ## API

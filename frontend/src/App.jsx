@@ -645,6 +645,7 @@ function SettingsPanel({
   onResetPassword,
   attendanceSettings,
   attendanceLocations,
+  subscription,
   onRotateAttendanceSalt,
   onUpdateAttendanceSecurity,
   onCreateAttendanceLocation,
@@ -732,6 +733,7 @@ function SettingsPanel({
         {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'users' ? 'active' : ''}`} aria-pressed={section === 'users'} onClick={() => setSection('users')}>Manajemen User</button>}
         {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'documents' ? 'active' : ''}`} aria-pressed={section === 'documents'} onClick={() => setSection('documents')}>Pengaturan Dokumen</button>}
         {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'attendance' ? 'active' : ''}`} aria-pressed={section === 'attendance'} onClick={() => setSection('attendance')}>Pengaturan Presensi</button>}
+        {user.role === 'admin' && <button type="button" className={`settings-tab ${section === 'subscription' ? 'active' : ''}`} aria-pressed={section === 'subscription'} onClick={() => setSection('subscription')}>Paket Langganan</button>}
       </nav>
 
       {section === 'profile' && (
@@ -805,6 +807,37 @@ function SettingsPanel({
             <label>Konfirmasi password baru<input name="confirm_password" type="password" required minLength="12" maxLength="72" autoComplete="new-password" /></label>
             <div className="settings-actions"><button className="button primary" disabled={busy}>Perbarui password</button></div>
           </form>
+        </section>
+      )}
+
+      {section === 'subscription' && user.role === 'admin' && (
+        <section className="panel settings-card subscription-settings-card" aria-label="Paket langganan">
+          <div className="panel-heading">
+            <div><p className="eyebrow">LANGGANAN</p><h2>Paket perusahaan</h2></div>
+            <span className="subscription-current-badge">Paket {subscription?.plan === 'free' ? 'Free' : subscription?.plan || 'Free'}</span>
+          </div>
+          <p className="muted">Paket dan kuota berlaku untuk perusahaan ini. Pekerja aktif adalah pekerja yang tidak diarsipkan dan berstatus Aktif.</p>
+          <div className="subscription-plan-grid">
+            <article className="subscription-plan-card current">
+              <span className="subscription-plan-state">PAKET SAAT INI</span>
+              <h3>Free</h3>
+              <p>Untuk memulai pengelolaan operasional HR.</p>
+              <strong className="subscription-quota">{subscription?.active_workers ?? '—'}<span>/{subscription?.worker_limit ?? 20} pekerja aktif</span></strong>
+              <span className="subscription-plan-footnote">Kuota aktif diperbarui dari data pekerja perusahaan.</span>
+            </article>
+            <article className="subscription-plan-card unavailable">
+              <span className="subscription-plan-state">SEGERA HADIR</span>
+              <h3>Pro</h3>
+              <p>Fitur paket Pro sedang dalam pengembangan.</p>
+              <button className="button secondary" type="button" disabled>Belum Tersedia</button>
+            </article>
+            <article className="subscription-plan-card unavailable">
+              <span className="subscription-plan-state">SEGERA HADIR</span>
+              <h3>Enterprise</h3>
+              <p>Fitur paket Enterprise sedang dalam pengembangan.</p>
+              <button className="button secondary" type="button" disabled>Belum Tersedia</button>
+            </article>
+          </div>
         </section>
       )}
 
@@ -1205,6 +1238,7 @@ function WorkspaceApp() {
   });
   const [attendanceLocations, setAttendanceLocations] = useState([]);
   const [documentSettings, setDocumentSettings] = useState({ warning_threshold_days: 30, updated_at: null });
+  const [subscription, setSubscription] = useState(null);
   const [summary, setSummary] = useState(null);
   const [activityHistory, setActivityHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -1247,6 +1281,7 @@ function WorkspaceApp() {
     if (!user) return;
     refreshDashboard().catch(showError);
     refreshWorkers().catch(showError);
+    refreshSubscription().catch(showError);
     refreshDepartments().catch(showError);
     refreshDocumentTypes()
       .catch(showError)
@@ -1262,7 +1297,7 @@ function WorkspaceApp() {
       if (realtimeRefreshTimerRef.current) window.clearTimeout(realtimeRefreshTimerRef.current);
       realtimeRefreshTimerRef.current = window.setTimeout(async () => {
         try {
-          const refreshTasks = [refreshDashboard(), refreshWorkers()];
+          const refreshTasks = [refreshDashboard(), refreshWorkers(), refreshSubscription()];
           const current = realtimeContextRef.current;
           if (current.activeTab === 'attendance') {
             refreshTasks.push(
@@ -1332,7 +1367,9 @@ function WorkspaceApp() {
   useEffect(() => {
     if (!user || activeTab !== 'overview') return undefined;
     const refreshMetrics = () => {
-      if (document.visibilityState === 'visible') refreshDashboard().catch(showError);
+      if (document.visibilityState === 'visible') {
+        Promise.all([refreshDashboard(), refreshSubscription()]).catch(showError);
+      }
     };
     document.addEventListener('visibilitychange', refreshMetrics);
     window.addEventListener('focus', refreshMetrics);
@@ -1421,6 +1458,10 @@ function WorkspaceApp() {
 
   async function refreshDashboard() {
     setSummary(await api('/dashboard'));
+  }
+
+  async function refreshSubscription() {
+    setSubscription(await api('/subscription'));
   }
 
   async function refreshWorkers() {
@@ -1627,10 +1668,14 @@ function WorkspaceApp() {
   }
 
   async function reloadData() {
-    await Promise.all([refreshDashboard(), refreshWorkers(), refreshDepartments()]);
+    await Promise.all([refreshDashboard(), refreshWorkers(), refreshDepartments(), refreshSubscription()]);
   }
 
   function openWorkerModal() {
+    if (workerQuotaFull) {
+      showError(new Error(`Kuota paket Free sudah penuh (${subscription.active_workers}/${subscription.worker_limit} pekerja aktif).`));
+      return;
+    }
     setError('');
     setEditingWorker(null);
     setWorkerModalOpen(true);
@@ -1645,6 +1690,10 @@ function WorkspaceApp() {
 
   async function handleCreateWorker(event) {
     event.preventDefault();
+    if (workerQuotaFull) {
+      showError(new Error(`Kuota paket Free sudah penuh (${subscription.active_workers}/${subscription.worker_limit} pekerja aktif).`));
+      return;
+    }
     const formElement = event.currentTarget;
     setBusy(true);
     setError('');
@@ -2236,6 +2285,8 @@ function WorkspaceApp() {
   );
   const monthlyDays = Array.from({ length: monthlyAttendance.days_in_month }, (_, index) => index + 1);
   const navigationTabs = NAVIGATION_TABS.filter((tab) => !tab.managerOnly || user?.role !== 'viewer');
+  const workerQuotaFull = subscription?.worker_limit != null
+    && subscription.active_workers >= subscription.worker_limit;
 
   function selectMatrixAttendanceDate(day) {
     const date = `${attendanceMonth}-${String(day).padStart(2, '0')}`;
@@ -2318,10 +2369,17 @@ function WorkspaceApp() {
               <i /> {realtimeConnected ? 'Live' : 'Menghubungkan'}
             </span>
             {user.role !== 'viewer' && (
-              <button className="button primary add-worker-button" type="button" onClick={openWorkerModal}>
+              <button
+                className="button primary add-worker-button"
+                type="button"
+                onClick={openWorkerModal}
+                disabled={busy || workerQuotaFull}
+                title={workerQuotaFull ? 'Kuota pekerja aktif paket Free sudah penuh.' : undefined}
+              >
                 <span aria-hidden="true">+</span> Tambah Pekerja
               </button>
             )}
+            {workerQuotaFull && <span className="worker-quota-topbar-note" role="status">Kuota pekerja paket Free penuh</span>}
             <div className="user-chip">
               <button className="user-profile-button" type="button" onClick={() => setActiveTab('settings')} aria-label="Buka pengaturan profil">
                 {user.profile_photo_url
@@ -2368,6 +2426,18 @@ function WorkspaceApp() {
             <StatCard label="Dokumen perlu tindak lanjut" value={summary?.expiring_documents ?? '—'} tone="amber" />
             <StatCard label="Klaim presensi pending" value={summary?.pending_attendance_claims ?? '—'} tone="rose" />
           </div>
+          {subscription && subscription.worker_limit != null && (
+            <section className={`worker-quota-card ${workerQuotaFull ? 'at-limit' : ''}`} aria-label="Penggunaan kuota pekerja">
+              <div className="worker-quota-heading">
+                <div><p className="eyebrow">PAKET FREE</p><h3>Kuota pekerja aktif</h3></div>
+                <strong>{subscription.active_workers}/{subscription.worker_limit} Pekerja</strong>
+              </div>
+              <progress value={Math.min(subscription.active_workers, subscription.worker_limit)} max={subscription.worker_limit} aria-label={`${subscription.active_workers} dari ${subscription.worker_limit} pekerja aktif`} />
+              <p>{workerQuotaFull
+                ? 'Kuota penuh. Penambahan pekerja dan aktivasi pekerja dibatasi sampai ada kuota tersedia.'
+                : `${subscription.worker_limit - subscription.active_workers} kuota pekerja aktif tersedia.`}</p>
+            </section>
+          )}
         </section>
 
         <section
@@ -2447,7 +2517,7 @@ function WorkspaceApp() {
                     }}
                   />
                   <button className="button secondary" type="button" disabled={busy} onClick={() => createWorkerWorkbook([]).catch(showError)}>Unduh template Excel</button>
-                  <button className="button secondary" type="button" disabled={busy} onClick={() => workerImportInputRef.current?.click()}>
+                  <button className="button secondary" type="button" disabled={busy || workerQuotaFull} onClick={() => workerImportInputRef.current?.click()}>
                     {busy ? 'Memproses…' : 'Impor Excel'}
                   </button>
                   <button
@@ -2475,6 +2545,12 @@ function WorkspaceApp() {
                 </div>
               )}
             </div>
+            {subscription?.worker_limit != null && (
+              <p className={`worker-quota-inline ${workerQuotaFull ? 'at-limit' : ''}`} role="status">
+                Paket Free · {subscription.active_workers}/{subscription.worker_limit} pekerja aktif
+                {workerQuotaFull ? ' — kuota penuh; penambahan/aktivasi dibatasi.' : ` — ${subscription.worker_limit - subscription.active_workers} kuota tersedia.`}
+              </p>
+            )}
             {user.role === 'admin' && <p className="settings-footnote">File impor dibaca hanya di browser. Impor mendukung maksimal 500 baris; nama/NIK duplikat dilewati. Isi dokumen wajib sebagai kode dipisahkan koma.</p>}
             {workerImportResult && (
               <div className="worker-import-report" role="status">
@@ -3058,6 +3134,7 @@ function WorkspaceApp() {
           onUpdateUser={handleUpdateUser}
           onResetPassword={handleResetPassword}
           attendanceSettings={attendanceSettings}
+          subscription={subscription}
           onUpdateAttendanceSecurity={updateAttendanceSecurity}
           attendanceLocations={attendanceLocations}
           onRotateAttendanceSalt={rotateAttendanceSalt}

@@ -163,7 +163,7 @@ Bootstrap database berada di `backend/src/db.js`. Database dibuat bila belum ada
 
 | Tabel | Fungsi dan relasi utama |
 |---|---|
-| `tenants` | Identitas perusahaan dan slug tenant. |
+| `tenants` | Identitas perusahaan, slug, dan `subscription_plan` (`free`, `pro`, `enterprise`; default `free`). |
 | `users` | User tenant, role, hash password, status aktif, `token_version`, metadata dan BLOB foto profil. |
 | `workers` | Profil pekerja, kontrak, status, daftar dokumen wajib JSON dalam `LONGTEXT`, soft-delete, tanggal efektif nonaktif. |
 | `departments` | Nama departemen per tenant; hash ternormalisasi untuk mencegah duplikasi. |
@@ -211,6 +211,7 @@ Kontrak endpoint terperinci tersedia pada [backend/docs/api-contract.md](../back
 |---|---|---|
 | Auth/profile | `/api/auth/login`, `/api/auth/me`, `/api/profile` | Semua role terautentikasi untuk profil sendiri |
 | Dashboard | `GET /api/dashboard` | Semua role |
+| Paket dan kuota | `GET /api/subscription` | Semua role tenant |
 | Pekerja | `GET/POST /api/workers`, `PATCH/DELETE /api/workers/:id` | Read semua; create Admin/HR Staff; destructive Admin |
 | Impor pekerja | `POST /api/admin/workers/import` | Admin |
 | Status pekerja | `PATCH /api/workers/:id/status` | Admin |
@@ -502,6 +503,8 @@ Vite meneruskan `/api` serta `/socket.io` termasuk upgrade WebSocket ke `http://
 - Tes yang ada menguji sebagian fungsi validasi/domain dan belum menggantikan integrasi lengkap terhadap MySQL/MariaDB.
 
 ### Batasan dan pekerjaan lanjutan
+
+Paket tenant disimpan pada `tenants.subscription_plan`; bootstrap menambahkan kolom untuk tenant lama dengan default `free`. Free memiliki batas 20 pekerja aktif non-arsip. Backend memeriksa batas pada tambah manual, impor Admin, dan transisi status ke Aktif. Pengambilan paket dan jumlah pekerja aktif melalui `GET /api/subscription`; tindakan yang melampaui batas merespons `409 WORKER_QUOTA_EXCEEDED`. Pro/Enterprise tampil sebagai belum tersedia, tanpa endpoint atau integrasi pembayaran.
 
 1. Uji schema bootstrap/migrasi dan route penuh terhadap MySQL serta MariaDB versi deployment.
 2. Tambahkan integration test isolasi tenant, RBAC endpoint, Socket.IO handshake/room, event delivery, dan transaksi.
