@@ -50,6 +50,7 @@ Sistem ditujukan untuk client perusahaan. Pekerja dicatat setelah offering lette
 - Backlog backend: `../backend/backend-tasks.md`.
 - Backlog frontend: `../frontend/frontend-task.md`.
 - Arahan proyek ini: file ini.
+- Catatan yang wajib ditinjau sebelum distribusi/komersialisasi: `./catatan-legalitas-dan-hak-cipta.md`.
 
 ## Arahan kerja
 
@@ -62,6 +63,7 @@ Sistem ditujukan untuk client perusahaan. Pekerja dicatat setelah offering lette
 7. Perlakukan informasi MCU dan dokumen identitas/ketenagakerjaan sebagai data sensitif. Simpan hanya data yang diperlukan; jangan menampilkan atau menyimpan hasil medis rinci kecuali kebutuhan dan dasar pengelolaannya telah disepakati.
 8. Jalankan validasi terkecil yang relevan untuk setiap perubahan; laporkan hasil dan keterbatasannya secara jelas.
 9. Buat perubahan sesempit mungkin, ikuti pola serta dokumentasi yang sudah ada, dan jangan memasukkan rahasia atau data sensitif ke repository.
+10. Sebelum distribusi atau komersialisasi, tinjau kepemilikan kode/aset, lisensi dan atribusi semua dependency, ketentuan layanan vendor, serta kewajiban privasi/data pekerja. Gunakan catatan legalitas di atas sebagai daftar perhatian; jangan menganggapnya sebagai nasihat hukum.
 
 ## Prinsip UI dan pengalaman pengguna
 

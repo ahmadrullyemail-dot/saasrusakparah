@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>Panduan Pengguna — rusakparah.web.id</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    :root {
+      --ink: #172b4d;
+      --muted: #64748b;
+      --blue: #4e62df;
+      --line: #e4e9f2;
+      --soft: #f5f7fc;
+      --green: #07805b;
+      --amber: #a45b08;
+      --red: #b63845;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); }
+    body { font-size: 9.2pt; line-height: 1.48; background: #e8edf5; }
+    .page {
+      position: relative; width: 210mm; height: 297mm; margin: 0 auto 8mm;
+      padding: 15mm 15mm 16mm; overflow: hidden; background: #fff;
+      page-break-after: always; break-after: page;
+    }
+    .page:last-child { page-break-after: auto; break-after: auto; }
+    .cover { display: flex; flex-direction: column; justify-content: space-between; color: #fff; background: linear-gradient(145deg, #172b4d 2%, #293b80 58%, #5268e7 100%); }
+    .cover::after { position: absolute; right: -44mm; bottom: 20mm; width: 150mm; height: 150mm; border: 1px solid #ffffff25; border-radius: 50%; content: ""; }
+    .cover::before { position: absolute; right: -18mm; bottom: 5mm; width: 100mm; height: 100mm; border: 1px solid #ffffff28; border-radius: 50%; content: ""; }
+    .cover-content, .cover-footer { position: relative; z-index: 1; }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 12pt; font-weight: 700; }
+    .brand-mark { display: inline-grid; width: 37px; height: 37px; place-items: center; border-radius: 12px; color: var(--blue); background: #fff; font-size: 14pt; font-weight: 800; }
+    .cover-kicker { margin: 36mm 0 7mm; color: #c8d2ff; font-size: 9pt; font-weight: 700; letter-spacing: .16em; }
+    h1 { max-width: 165mm; margin: 0; font-size: 36pt; line-height: 1.08; letter-spacing: -.04em; }
+    .cover-subtitle { max-width: 145mm; margin: 9mm 0 0; color: #e1e7ff; font-size: 14pt; line-height: 1.5; }
+    .cover-flow { display: flex; align-items: center; gap: 7px; margin-top: 21mm; }
+    .cover-flow span { padding: 8px 11px; border: 1px solid #ffffff40; border-radius: 9px; color: #fff; background: #ffffff10; font-size: 8.5pt; font-weight: 650; }
+    .cover-flow b { color: #c8d2ff; font-size: 13pt; }
+    .cover-note { max-width: 135mm; margin-top: 10mm; color: #d7def7; font-size: 9pt; }
+    .cover-footer { display: flex; justify-content: space-between; padding-top: 5mm; border-top: 1px solid #ffffff3d; color: #d8def6; font-size: 8pt; }
+    .topline { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5mm; color: #77859b; font-size: 7.5pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .topline strong { color: var(--blue); letter-spacing: .02em; }
+    h2 { margin: 0 0 3mm; font-size: 22pt; line-height: 1.13; letter-spacing: -.035em; }
+    h3 { margin: 4mm 0 1.5mm; font-size: 12pt; line-height: 1.25; }
+    p { margin: 0 0 2.5mm; }
+    ul, ol { margin: 1.5mm 0 3mm; padding-left: 5mm; }
+    li { margin: 0 0 1.1mm; }
+    .lead { max-width: 175mm; margin-bottom: 5mm; color: var(--muted); font-size: 10.5pt; }
+    .eyebrow { margin-bottom: 1.5mm; color: var(--blue); font-size: 7.5pt; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .image-frame { margin: 3mm 0; padding: 2mm; border: 1px solid var(--line); border-radius: 4mm; background: #f8faff; }
+    .image-frame img { display: block; width: 100%; max-height: 133mm; object-fit: contain; object-position: top center; border-radius: 2.5mm; }
+    .image-frame.compact img { max-height: 98mm; }
+    .image-frame.portal img { width: auto; max-width: 100%; max-height: 173mm; margin: 0 auto; }
+    figcaption { margin-top: 1.5mm; color: #748198; font-size: 7pt; }
+    .sim-note { display: inline-block; margin: 1mm 0 2mm; padding: 1mm 2mm; border-radius: 12px; color: #80510b; background: #fff4dc; font-size: 7pt; font-weight: 700; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
+    .card { padding: 3.2mm 3.5mm; border: 1px solid var(--line); border-radius: 3mm; background: #fff; }
+    .card.soft { background: var(--soft); }
+    .card h3 { margin-top: 0; }
+    .card p:last-child, .card ul:last-child, .card ol:last-child { margin-bottom: 0; }
+    .callout { margin: 3mm 0; padding: 3mm 4mm; border-left: 3px solid var(--blue); border-radius: 2mm; color: #33425f; background: #f3f5ff; }
+    .callout.warn { border-left-color: #e3a23d; background: #fff8e9; }
+    .callout.danger { border-left-color: #d45c64; background: #fff1f2; }
+    .callout.good { border-left-color: #20a477; background: #edfbf5; }
+    .flow { display: grid; grid-template-columns: repeat(4,1fr); gap: 2.5mm; margin: 3mm 0 4mm; }
+    .flow div { position: relative; padding: 3mm; border: 1px solid var(--line); border-radius: 2.5mm; background: #f8faff; }
+    .flow strong { display: block; margin-bottom: 1mm; color: var(--blue); font-size: 9pt; }
+    .flow small { display: block; color: var(--muted); font-size: 7.4pt; }
+    table { width: 100%; margin: 2mm 0 3mm; border-collapse: collapse; font-size: 8pt; }
+    th, td { padding: 2.2mm 2.5mm; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: #3c4d6c; background: #f3f6fb; font-weight: 700; }
+    .badge { display: inline-block; padding: .6mm 2mm; border-radius: 10px; font-size: 7pt; font-weight: 700; white-space: nowrap; }
+    .badge.green { color: var(--green); background: #e5f7ef; }
+    .badge.amber { color: var(--amber); background: #fff3dc; }
+    .badge.red { color: var(--red); background: #ffeaec; }
+    .badge.blue { color: #455ad0; background: #edf0ff; }
+    .small { color: var(--muted); font-size: 7.8pt; }
+    .two-up { display: grid; grid-template-columns: 1.08fr .92fr; gap: 5mm; align-items: start; }
+    .portal-grid { display: grid; grid-template-columns: 78mm 1fr; gap: 6mm; align-items: start; }
+    .checklist { list-style: none; padding: 0; }
+    .checklist li { position: relative; padding-left: 6mm; }
+    .checklist li::before { position: absolute; left: 0; color: var(--green); font-weight: 800; content: "✓"; }
+    .page-footer { position: absolute; right: 15mm; bottom: 8mm; left: 15mm; display: flex; justify-content: space-between; padding-top: 2mm; border-top: 1px solid var(--line); color: #8290a4; font-size: 7pt; }
+    .page-footer strong { color: var(--blue); }
+    .divider { height: 1px; margin: 3mm 0; background: var(--line); }
+    .tight li { margin-bottom: .6mm; }
+    @media screen {
+      .page { box-shadow: 0 8px 30px #172b4d18; }
+    }
+    @media print {
+      body { background: #fff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .page { margin: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <section class="page cover">
+    <div class="cover-content">
+      <div class="brand"><span class="brand-mark">R</span><span>rusakparah.web.id<br><small style="font-size:8pt;font-weight:500;color:#d7def7">HRD Management</small></span></div>
+      <p class="cover-kicker">PANDUAN PENGGUNA · EDISI 1.0</p>
+      <h1>Ruang kerja HR<br>yang lebih terarah.</h1>
+      <p class="cover-subtitle">Panduan praktis untuk mengelola perjalanan pekerja, dokumen ketenagakerjaan, dan presensi dalam satu aplikasi.</p>
+      <div class="cover-flow"><span>Offering</span><b>→</b><span>Pra-aktif</span><b>→</b><span>Aktif</span><b>→</b><span>Nonaktif</span></div>
+      <p class="cover-note">Untuk Admin, HR Staff, Viewer, dan pekerja yang menggunakan portal presensi. Panduan ini mengikuti fungsi aplikasi yang tersedia per 27 Oktober 2026.</p>
+    </div>
+    <div class="cover-footer"><span>Dokumentasi pengguna</span><span>27 Oktober 2026</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><span>01 · Akses & mulai</span><strong>rusakparah.web.id</strong></div>
+    <p class="eyebrow">MULAI MENGGUNAKAN APLIKASI</p>
+    <h2>Masuk ke ruang kerja HR</h2>
+    <p class="lead">Aplikasi membantu perusahaan memantau proses pekerja setelah offering letter diterbitkan. Data perusahaan dipisahkan per tenant dan menu menyesuaikan peran akun.</p>
+    <div class="two-up">
+      <div>
+        <h3>Masuk atau buat perusahaan</h3>
+        <ol>
+          <li>Buka alamat aplikasi yang diberikan perusahaan.</li>
+          <li>Masukkan email dan kata sandi akun. Admin pertama dapat memilih <b>Daftarkan perusahaan baru</b> jika pendaftaran tersedia.</li>
+          <li>Setelah masuk, mulai dari Ringkasan. Gunakan menu navigasi di sisi kiri untuk berpindah modul.</li>
+        </ol>
+        <div class="callout warn"><b>Lupa kata sandi?</b> Pilih tautan pemulihan, masukkan email terdaftar, lalu ikuti tautan dari email. Tautan berlaku 30 menit. Pengiriman harus diaktifkan oleh operator melalui konfigurasi email.</div>
+        <h3>Penyiapan awal Admin</h3>
+        <ol class="tight">
+          <li>Tambahkan jenis dokumen dan atur ambang pengingat.</li>
+          <li>Konfigurasikan lokasi presensi dan keamanan tautan pekerja.</li>
+          <li>Undang/buat akun sesuai role yang diperlukan.</li>
+          <li>Catat pekerja dan bagikan tautan presensi secara aman.</li>
+        </ol>
+      </div>
+      <figure class="image-frame compact">
+        <img src="./panduan-06-masuk.png" alt="Form masuk aplikasi">
+        <figcaption>Form masuk. Gambar menunjukkan antarmuka aplikasi; data akun tidak diisi.</figcaption>
+      </figure>
+    </div>
+    <div class="divider"></div>
+    <div class="cols">
+      <div class="card soft"><h3>Navigasi utama</h3><p>Ringkasan · Data pekerja · Dokumen & masa berlaku · Presensi · Riwayat aktivitas · Pengaturan. Riwayat hanya tersedia untuk Admin dan HR Staff.</p></div>
+      <div class="card soft"><h3>Changelog</h3><p>Landing page memiliki tautan <b>Changelog</b> untuk melihat pembaruan aplikasi. Isi dashboard operasional berasal dari data tenant yang sedang masuk, bukan angka ilustrasi landing page.</p></div>
+    </div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>02 / 09</strong></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><span>02 · Ringkasan</span><strong>Dashboard HRD</strong></div>
+    <p class="eyebrow">GAMBARAN OPERASIONAL</p>
+    <h2>Prioritaskan hal yang perlu ditindaklanjuti</h2>
+    <p class="lead">Ringkasan menampilkan status pekerja, dokumen mendekati atau melewati masa berlaku, serta antrean klaim presensi. Klik kartu untuk membuka daftar atau modul terkait.</p>
+    <figure class="image-frame">
+      <img src="./panduan-01-ringkasan.png" alt="Dashboard Ringkasan dengan data simulasi">
+      <figcaption>Ringkasan aplikasi. Semua nama dan angka pada tangkapan layar adalah data simulasi, bukan data perusahaan.</figcaption>
+    </figure>
+    <div class="cols">
+      <div class="card"><h3>Kartu status pekerja</h3><p><b>Offering</b>, <b>Pra-aktif</b>, <b>Aktif</b>, dan <b>Nonaktif</b> menunjukkan jumlah pekerja per tahap. Kartu dapat membuka Data pekerja dengan filter status terkait.</p></div>
+      <div class="card"><h3>Tindak lanjut & persetujuan</h3><p><b>Dokumen perlu tindak lanjut</b> menunjukkan dokumen kedaluwarsa/masuk ambang. <b>Klaim presensi pending</b> membuka Pusat Persetujuan. Widget mengambil data dari API tenant.</p></div>
+    </div>
+    <div class="callout good"><b>Pembaruan data:</b> perubahan penting dapat menyegarkan tampilan melalui koneksi real-time. Ringkasan juga melakukan pembaruan berkala saat halaman terbuka.</div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>03 / 09</strong></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><span>03 · Data pekerja</span><strong>Pengelolaan siklus</strong></div>
+    <p class="eyebrow">DATA PEKERJA</p>
+    <h2>Kelola pekerja dari offering hingga nonaktif</h2>
+    <p class="lead">Catat pekerja setelah offering letter diterbitkan, lengkapi persyaratan, dan tinjau statusnya dari satu daftar.</p>
+    <figure class="image-frame">
+      <img src="./panduan-02-data-pekerja.png" alt="Daftar pekerja dengan data simulasi">
+      <figcaption>Daftar pekerja dengan pencarian, filter status, indikator kelayakan, dan kontrol Admin. Data pada gambar fiktif.</figcaption>
+    </figure>
+    <div class="two-up">
+      <div>
+        <h3>Tambah dan cari pekerja</h3>
+        <ol class="tight">
+          <li>Pilih <b>Tambah Pekerja</b>, isi identitas, kontak, departemen, posisi, kontrak, serta tanggal yang diminta.</li>
+          <li>Pilih jenis dokumen yang diwajibkan untuk pekerja tersebut, lalu simpan.</li>
+          <li>Gunakan kolom pencarian dan filter untuk menemukan pekerja berdasarkan nama, NIK, posisi, departemen, atau status.</li>
+          <li>Buka profil pekerja untuk melihat dokumen, kelayakan, dan riwayat status.</li>
+        </ol>
+      </div>
+      <div>
+        <h3>Transisi status</h3>
+        <div class="flow">
+          <div><strong>Offering</strong><small>Proses setelah offering letter.</small></div>
+          <div><strong>Pra-aktif</strong><small>Persyaratan sedang dilengkapi.</small></div>
+          <div><strong>Aktif</strong><small>Admin mengaktifkan setelah syarat terpenuhi.</small></div>
+          <div><strong>Nonaktif</strong><small>Dapat dijadwalkan atau dilakukan sesuai wewenang.</small></div>
+        </div>
+        <p class="small">Kelayakan merupakan rekomendasi sistem; perubahan status tetap dilakukan Admin. Aktivasi memerlukan dokumen wajib terbaru yang valid dan masih berlaku.</p>
+      </div>
+    </div>
+    <div class="callout warn"><b>Paket Free:</b> dibatasi maksimum 20 pekerja aktif. Admin dapat mengimpor maksimal 500 baris Excel; workbook diproses di browser. Baris duplikat/bermasalah dilaporkan untuk ditinjau.</div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>04 / 09</strong></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><span>04 · Dokumen</span><strong>Kelengkapan & masa berlaku</strong></div>
+    <p class="eyebrow">DOKUMEN & MASA BERLAKU</p>
+    <h2>Cari pekerja, cek kelayakan, tindak lanjuti dokumen</h2>
+    <p class="lead">Gunakan profil dokumen untuk melihat persyaratan dan riwayat. Ambang pemantauan bersumber dari pengaturan perusahaan atau override per jenis dokumen.</p>
+    <figure class="image-frame">
+      <img src="./panduan-03-dokumen.png" alt="Panel dokumen pekerja dengan data simulasi">
+      <figcaption>Panel dokumen berisi hasil pencarian, ringkasan kelayakan, formulir pencatatan, dan daftar masa berlaku. Data fiktif.</figcaption>
+    </figure>
+    <div class="cols">
+      <div class="card"><h3>Alur pencarian</h3><ol class="tight"><li>Ketik minimal <b>3 karakter</b> pada pencarian pekerja.</li><li>Pilih pekerja dari hasil yang cocok.</li><li>Tinjau syarat wajib dan status kelayakan.</li><li>Untuk mencatat dokumen, pilih jenis dan status, lalu lengkapi tanggal sesuai status.</li></ol></div>
+      <div class="card"><h3>Status dokumen</h3><ul class="tight"><li><span class="badge amber">Menunggu</span> dapat memakai tanggal target penyelesaian.</li><li><span class="badge green">Valid</span> mencatat rentang berlaku.</li><li><span class="badge red">Kedaluwarsa</span> tetap muncul untuk ditindaklanjuti.</li><li><span class="badge">Ditolak</span> tidak memakai tanggal berlaku.</li></ul></div>
+    </div>
+    <div class="callout danger"><b>Privasi:</b> sistem mencatat metadata, status, dan masa berlaku dokumen; bukan tempat mengunggah dokumen pekerja atau memasukkan hasil medis MCU secara rinci.</div>
+    <p class="small">Admin mengatur ambang default perusahaan 1–365 hari dan dapat memberi nilai khusus per jenis dokumen. Catatan terbaru per jenis menjadi acuan persyaratan.</p>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>05 / 09</strong></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><span>05 · Presensi HR</span><strong>Rekap & persetujuan</strong></div>
+    <p class="eyebrow">TINJAUAN HR</p>
+    <h2>Pantau klaim dan pola kehadiran</h2>
+    <p class="lead">Pilih bulan untuk melihat metrik, antrean pengajuan, dan matriks kehadiran. Klik sel tanggal pada matriks untuk menuju operasional harian.</p>
+    <figure class="image-frame">
+      <img src="./panduan-04-presensi.png" alt="Panel presensi bulanan dengan data simulasi">
+      <figcaption>Presensi bulanan: metrik, klaim pending, matriks, legenda, dan navigasi periode. Data fiktif.</figcaption>
+    </figure>
+    <div class="two-up">
+      <div>
+        <h3>Pusat Persetujuan</h3>
+        <ol class="tight">
+          <li>Periksa bulan dan daftar klaim berstatus pending.</li>
+          <li>Admin memilih <b>Tinjau Bukti & Validasi</b>.</li>
+          <li>Periksa detail dan bukti yang tersedia.</li>
+          <li>Pilih <b>Setujui</b> atau <b>Tolak</b>. Keputusan memperbarui antrean.</li>
+        </ol>
+        <p class="small">HR Staff dan Viewer dapat membaca antrean; persetujuan hanya Admin.</p>
+      </div>
+      <div>
+        <h3>Matriks bulanan</h3>
+        <p>Gunakan pencarian nama/posisi, pilihan 25/50/100 baris, pagination, dan scroll horizontal.</p>
+        <p><span class="badge green">H</span> Hadir &nbsp; <span class="badge amber">T</span> Terlambat &nbsp; <span class="badge blue">I</span> Izin/Cuti &nbsp; <span class="badge blue">S</span> Sakit &nbsp; <span class="badge red">X</span> Inkomplit &nbsp; <span class="badge amber">P</span> Pending</p>
+      </div>
+    </div>
+    <div class="callout warn">Status terlambat hanya ditampilkan jika tersedia dari data. Perhitungan otomatis berbasis jadwal/shift belum termasuk fungsi saat ini.</div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>06 / 09</strong></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><span>06 · Portal pekerja</span><strong>Check-In & Check-Out</strong></div>
+    <p class="eyebrow">PRESENSI PEKERJA</p>
+    <h2>Gunakan tautan personal untuk mencatat kehadiran</h2>
+    <div class="portal-grid">
+      <figure class="image-frame portal">
+        <img src="./panduan-07-portal-pekerja.png" alt="Portal presensi pekerja dengan data simulasi">
+        <figcaption>Portal presensi pekerja. Identitas dan konteks pada gambar disimulasikan.</figcaption>
+      </figure>
+      <div>
+        <h3>Sebelum mulai</h3>
+        <ul class="tight">
+          <li>Buka tautan resmi dari HR di browser yang mengizinkan lokasi.</li>
+          <li>Pastikan nama perusahaan dan pekerja benar.</li>
+          <li>Gunakan perangkat dan lokasi yang sesuai kebijakan perusahaan.</li>
+        </ul>
+        <h3>Check-In / Check-Out</h3>
+        <ol class="tight">
+          <li>Pilih aktivitas (reguler, Dinas, Off, Izin, Cuti, atau Sakit).</li>
+          <li>Tekan Check-In / Hadir atau ajukan status yang diperlukan.</li>
+          <li>Izinkan akses lokasi saat browser memintanya.</li>
+          <li>Lakukan Check-Out setelah pekerjaan selesai.</li>
+        </ol>
+        <h3>Lokasi & bukti</h3>
+        <p>Aktivitas yang diwajibkan geofence harus berada dalam radius lokasi yang sesuai. Check-In Dinas meminta bukti foto dan menunggu persetujuan Admin.</p>
+        <div class="callout danger"><b>Jaga tautan:</b> tautan presensi adalah kredensial pekerja. Jangan bagikan kepada orang lain. Rotasi salt oleh Admin membatalkan semua tautan lama.</div>
+      </div>
+    </div>
+    <div class="callout warn">Pemeriksaan lokasi web adalah best-effort: browser tidak dapat membuktikan bahwa koordinat berasal dari GPS asli. Anti-Mock Location bukan jaminan anti-spoofing.</div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>07 / 09</strong></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><span>07 · Pengaturan</span><strong>Administrasi perusahaan</strong></div>
+    <p class="eyebrow">PENGATURAN</p>
+    <h2>Atur akun, dokumen, dan keamanan presensi</h2>
+    <figure class="image-frame compact">
+      <img src="./panduan-05-pengaturan.png" alt="Pengaturan dokumen dengan data simulasi">
+      <figcaption>Pengaturan dokumen: ambang default, katalog jenis dokumen, serta ambang per jenis. Data fiktif.</figcaption>
+    </figure>
+    <div class="cols">
+      <div class="card"><h3>Profil & keamanan</h3><p>Semua pengguna dapat mengubah nama/foto profil, memilih tema, serta mengganti kata sandi dengan verifikasi kata sandi lama. Kata sandi baru minimal 12 karakter.</p></div>
+      <div class="card"><h3>Jenis dokumen</h3><p>Admin membuat dan mengelola katalog perusahaan. Ambang default 1–365 hari; nilai per jenis dapat mengikuti default atau menggunakan override sendiri.</p></div>
+      <div class="card"><h3>Pengaturan presensi</h3><p>Admin mengelola lokasi/geofence dan opsi Anti-Mock Location. Pastikan peta, radius, dan aktivitas yang diwajibkan sesuai kebijakan kerja.</p></div>
+      <div class="card"><h3>Manajemen user</h3><p>Admin membuat akun Admin, HR Staff, atau Viewer. Buat akun seperlunya dan berikan peran dengan hak minimum yang dibutuhkan.</p></div>
+    </div>
+    <div class="callout danger"><b>Rotasi salt:</b> membatalkan seluruh tautan presensi yang sudah diterbitkan. Siapkan distribusi tautan baru sebelum mengonfirmasi rotasi.</div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>08 / 09</strong></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><span>08 · Hak akses & catatan</span><strong>Penggunaan aman</strong></div>
+    <p class="eyebrow">SIAPA DAPAT MELAKUKAN APA</p>
+    <h2>Peran, pemecahan masalah, dan batasan</h2>
+    <table>
+      <thead><tr><th>Fungsi</th><th>Admin</th><th>HR Staff</th><th>Viewer</th></tr></thead>
+      <tbody>
+        <tr><td>Melihat dashboard dan data operasional tenant</td><td>Ya</td><td>Ya</td><td>Ya</td></tr>
+        <tr><td>Membuat pekerja dan mencatat dokumen</td><td>Ya</td><td>Ya</td><td>Tidak</td></tr>
+        <tr><td>Mengubah/mengarsipkan pekerja atau mengubah status</td><td>Ya</td><td>Tidak</td><td>Tidak</td></tr>
+        <tr><td>Membuat tautan presensi</td><td>Ya</td><td>Ya</td><td>Tidak</td></tr>
+        <tr><td>Setuju/tolak klaim dan mengelola pengaturan perusahaan</td><td>Ya</td><td>Tidak</td><td>Tidak</td></tr>
+        <tr><td>Riwayat aktivitas</td><td>Ya</td><td>Ya</td><td>Tidak</td></tr>
+        <tr><td>Profil dan keamanan akun sendiri</td><td>Ya</td><td>Ya</td><td>Ya</td></tr>
+      </tbody>
+    </table>
+    <div class="cols">
+      <div class="card soft">
+        <h3>Pemecahan masalah singkat</h3>
+        <ul class="tight">
+          <li><b>Presensi ditolak:</b> cek izin lokasi, sinyal, status pekerja, aktivitas, dan radius.</li>
+          <li><b>Pengajuan tidak terlihat:</b> pilih bulan yang sesuai tanggal klaim.</li>
+          <li><b>Pekerja belum dapat aktif:</b> tinjau semua dokumen wajib dan tanggal berlaku.</li>
+          <li><b>Tautan tidak berlaku:</b> minta Admin memeriksa status dan menerbitkan ulang tautan.</li>
+          <li><b>Impor bermasalah:</b> cek template, format tanggal, kode dokumen, dan duplikasi.</li>
+        </ul>
+      </div>
+      <div class="card soft">
+        <h3>Batasan yang perlu diketahui</h3>
+        <ul class="tight">
+          <li>Kelayakan dokumen adalah rekomendasi; Admin tetap menentukan status pekerja.</li>
+          <li>Jadwal shift dan hitung keterlambatan otomatis belum tersedia.</li>
+          <li>Undangan email dan unggah file dokumen pekerja belum termasuk alur saat ini.</li>
+          <li>Pengingat dokumen ditampilkan di aplikasi, bukan notifikasi otomatis ke email.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout danger"><b>Lindungi data:</b> jangan membagikan kata sandi, token/link presensi, bukti foto, atau screenshot yang memuat data pribadi. Simpan hanya data yang diperlukan; jangan masukkan hasil medis rinci MCU.</div>
+    <p class="small">Tangkapan layar internal dalam panduan ini menggunakan data fiktif dan diberi label “Data Simulasi”. Fitur/akses dapat berbeda sesuai versi aplikasi, konfigurasi perusahaan, dan role akun.</p>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>09 / 09</strong></div>
+  </section>
+</body>
+</html>

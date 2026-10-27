@@ -4,7 +4,7 @@
 Panduan untuk Admin, HR Staff, dan Viewer  
 Versi dokumen: 1.0 · Diperbarui: 25 Oktober 2026
 
-> **Catatan:** Panduan ini mengikuti fitur yang tersedia pada aplikasi saat ini. Tangkapan layar di bawah adalah placeholder; ganti dengan screenshot terbaru dari aplikasi sebelum dokumen dibagikan sebagai materi final.
+> **Panduan PDF A4:** Versi siap dibagikan dengan tangkapan layar aplikasi tersedia di [Panduan Pengguna A4](./panduan-pengguna-a4.pdf). Screenshot modul internal memakai data simulasi, bukan data perusahaan. File Markdown ini menjadi referensi teks; placeholder screenshot di bawah bukan bagian dari PDF final.
 
 ## Daftar Isi
 
