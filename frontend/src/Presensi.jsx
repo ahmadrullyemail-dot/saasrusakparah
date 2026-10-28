@@ -473,21 +473,36 @@ function HistoryPanel({ records }) {
       {records.length ? (
         <div className="attendance-history-list">
           {records.map((record) => (
-            <article className="attendance-history-item" key={record.attendance_date}>
+            <article
+              className={`attendance-history-item ${record.record_type === 'leave_request' ? 'attendance-history-request-rejected' : ''}`}
+              key={record.record_type === 'leave_request' ? `leave-${record.request_id}` : `attendance-${record.attendance_date}`}
+            >
               <div className="attendance-history-date">
                 <strong>{new Date(`${record.attendance_date}T12:00:00+07:00`).toLocaleDateString('id-ID', {
                   day: '2-digit',
                   month: 'short',
                   timeZone: 'Asia/Jakarta',
                 })}</strong>
-                <small>{record.approval_status === 'pending'
-                  ? 'Menunggu persetujuan'
-                  : `${statusText(record.status, Boolean(record.check_in_time))}${record.approval_status === 'rejected' ? ' · Ditolak' : ''}`}</small>
+                <small>{record.record_type === 'leave_request'
+                  ? `Pengajuan ${leaveTypeLabel(record.leave_type)} · Ditolak`
+                  : record.approval_status === 'pending'
+                    ? 'Menunggu persetujuan'
+                    : `${statusText(record.status, Boolean(record.check_in_time))}${record.approval_status === 'rejected' ? ' · Ditolak' : ''}`}</small>
               </div>
-              <div className="attendance-history-times">
-                <span>Clock In <strong>{formatTime(record.check_in_time)}</strong></span>
-                <span>Clock Out <strong>{formatTime(record.check_out_time)}</strong></span>
-              </div>
+              {record.record_type === 'leave_request' ? (
+                <div className="attendance-history-request-details">
+                  <span>
+                    Rentang tanggal: {formatLeaveDate(record.attendance_date)} – {formatLeaveDate(record.end_date)}
+                  </span>
+                  <span>Alasan: {record.reason}</span>
+                  {record.rejection_note && <strong>Catatan HR: {record.rejection_note}</strong>}
+                </div>
+              ) : (
+                <div className="attendance-history-times">
+                  <span>Clock In <strong>{formatTime(record.check_in_time)}</strong></span>
+                  <span>Clock Out <strong>{formatTime(record.check_out_time)}</strong></span>
+                </div>
+              )}
             </article>
           ))}
         </div>
@@ -534,23 +549,43 @@ export default function Presensi() {
   }, []);
 
   useEffect(() => {
+    let active = true;
     if (!token || !workerId) {
       setError('Link presensi tidak valid. Gunakan tautan resmi dari HR perusahaan.');
       setLoading(false);
       setLeaveRequestsLoading(false);
-      return;
+      return () => { active = false; };
     }
-    publicAttendanceRequest(`?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}`)
-      .then(setAttendance)
-      .catch((requestError) => setError(requestError.message))
-      .finally(() => setLoading(false));
-    publicLeaveRequest(`?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}`)
-      .then((requests) => {
-        if (!leaveSubmitLockRef.current) setLeaveRequests(requests);
-      })
-      .catch((requestError) => setLeaveError(requestError.message))
-      .finally(() => setLeaveRequestsLoading(false));
-  }, [token, workerId]);
+    const query = `?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}`;
+    const refreshPortalData = () => {
+      publicAttendanceRequest(query)
+        .then((data) => {
+          if (active) setAttendance(data);
+        })
+        .catch((requestError) => {
+          if (active) setError(requestError.message);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+      publicLeaveRequest(query)
+        .then((requests) => {
+          if (active && !leaveSubmitLockRef.current) setLeaveRequests(requests);
+        })
+        .catch((requestError) => {
+          if (active) setLeaveError(requestError.message);
+        })
+        .finally(() => {
+          if (active) setLeaveRequestsLoading(false);
+        });
+    };
+    refreshPortalData();
+    const refreshInterval = window.setInterval(refreshPortalData, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(refreshInterval);
+    };
+  }, [section, token, workerId]);
 
   async function submitLeaveRequest(event) {
     event.preventDefault();

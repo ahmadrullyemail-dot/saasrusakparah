@@ -2207,3 +2207,17 @@ input:focus, select:focus, textarea:focus {
   .leave-review-actions { flex-direction: column-reverse; }
   .leave-review-actions .button { width: 100%; }
 }
+.attendance-history-request-rejected {
+  border-color: #f2d5d5;
+  background: #fffafa;
+}
+.attendance-history-request-details {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.attendance-history-request-details strong { color: #963f3f; }

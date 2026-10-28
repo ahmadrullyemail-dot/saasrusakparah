@@ -62,6 +62,7 @@ const leaveAttachmentUpload = multer({
 const ATTENDANCE_ACTIVITIES = new Set(['check_in', 'check_out', 'off', 'permission', 'leave', 'sick']);
 const EMPLOYEE_REQUEST_TYPES = new Set(['off', 'permission', 'leave', 'sick']);
 const LEAVE_REQUEST_TYPES = new Set(['izin', 'cuti', 'sakit', 'off']);
+const BLOCKING_LEAVE_REQUEST_STATUSES = ['pending', 'approved'];
 
 function profilePhotoUrl(user) {
   if (user.profile_photo_updated_at) return '/api/profile/photo';
@@ -319,6 +320,10 @@ function validLeaveRequestInput(input) {
 
 function validLeaveRequestStatus(value) {
   return value === 'approved' || value === 'rejected';
+}
+
+function leaveRequestBlocksDate(status) {
+  return BLOCKING_LEAVE_REQUEST_STATUSES.includes(status);
 }
 
 function validLeaveRejectionNote(value) {
@@ -699,10 +704,10 @@ app.post('/api/leaves', leaveAttachmentUpload.single('attachment'), asyncRoute(a
     }
     const [conflicts] = await connection.execute(
       `SELECT id FROM leave_requests
-        WHERE tenant_id = ? AND worker_id = ? AND status IN ('pending', 'approved')
+        WHERE tenant_id = ? AND worker_id = ? AND status IN (?, ?)
           AND start_date <= ? AND end_date >= ?
         LIMIT 1 FOR UPDATE`,
-      [worker.tenant_id, worker.worker_id, endDate, startDate]
+      [worker.tenant_id, worker.worker_id, ...BLOCKING_LEAVE_REQUEST_STATUSES, endDate, startDate]
     );
     if (conflicts.length) {
       await connection.rollback();
@@ -851,6 +856,38 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
       LIMIT 30`,
     [row.tenant_id, row.worker_id]
   );
+  const [rejectedLeaveRows] = await pool.execute(
+    `SELECT id, \`type\`, DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+            DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
+            reason, rejection_note, reviewed_at, created_at
+       FROM leave_requests
+      WHERE tenant_id = ? AND worker_id = ? AND status = 'rejected'
+        AND (end_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+          OR reviewed_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY))
+      ORDER BY COALESCE(reviewed_at, created_at) DESC, id DESC
+      LIMIT 30`,
+    [row.tenant_id, row.worker_id]
+  );
+  const rejectedLeaveHistory = rejectedLeaveRows.map((request) => ({
+    record_type: 'leave_request',
+    request_id: String(request.id),
+    attendance_date: request.start_date,
+    end_date: request.end_date,
+    status: leaveAttendanceStatus(request.type),
+    attendance_type: leaveAttendanceStatus(request.type),
+    approval_status: 'rejected',
+    leave_request_status: 'rejected',
+    leave_type: request.type,
+    reason: request.reason,
+    rejection_note: request.rejection_note,
+    check_in_time: null,
+    check_out_time: null,
+    reviewed_at: request.reviewed_at,
+  }));
+  const recentAttendance = [...historyRows, ...rejectedLeaveHistory]
+    .sort((first, second) => String(second.attendance_date).localeCompare(String(first.attendance_date))
+      || String(second.reviewed_at || '').localeCompare(String(first.reviewed_at || '')))
+    .slice(0, 30);
   const { tenant_id, token_salt, token_hash, ...attendanceData } = row;
   res.json({
     data: {
@@ -860,7 +897,7 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
       has_evidence: Boolean(attendanceData.has_evidence),
       anti_mock_location_enabled: Boolean(attendanceData.anti_mock_location_enabled),
       locations,
-      recent_attendance: historyRows,
+      recent_attendance: recentAttendance,
     },
   });
 }));
@@ -3306,6 +3343,7 @@ module.exports = {
   validDate,
   validLeaveRequestInput,
   validLeaveRequestStatus,
+  leaveRequestBlocksDate,
   validLeaveRejectionNote,
   leaveAttendanceStatus,
   leaveRequestDates,

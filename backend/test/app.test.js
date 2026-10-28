@@ -5,6 +5,7 @@ const {
   validDate,
   validLeaveRequestInput,
   validLeaveRequestStatus,
+  leaveRequestBlocksDate,
   validLeaveRejectionNote,
   leaveAttendanceStatus,
   leaveRequestDates,
@@ -166,6 +167,9 @@ test('leave requests require a supported type, real ordered dates, and a concise
   assert.equal(validLeaveRequestStatus('approved'), true);
   assert.equal(validLeaveRequestStatus('rejected'), true);
   assert.equal(validLeaveRequestStatus('pending'), false);
+  assert.equal(leaveRequestBlocksDate('pending'), true);
+  assert.equal(leaveRequestBlocksDate('approved'), true);
+  assert.equal(leaveRequestBlocksDate('rejected'), false);
   assert.equal(validLeaveRejectionNote('Alasan cukup'), true);
   assert.equal(validLeaveRejectionNote('abc'), false);
   assert.equal(validLeaveRejectionNote('  '), false);
