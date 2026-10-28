@@ -211,6 +211,24 @@ async function initializeDatabase() {
       KEY ix_attendance_location_tenant (tenant_id),
       CONSTRAINT fk_attendance_location_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS leave_requests (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      tenant_id BIGINT UNSIGNED NOT NULL,
+      worker_id BIGINT UNSIGNED NOT NULL,
+      \`type\` ENUM('izin', 'cuti', 'sakit', 'off') NOT NULL,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      reason VARCHAR(1000) NOT NULL,
+      status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+      reviewed_by BIGINT UNSIGNED NULL,
+      reviewed_at DATETIME NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY ix_leave_requests_tenant_status_created (tenant_id, status, created_at, id),
+      KEY ix_leave_requests_worker_created (tenant_id, worker_id, created_at, id),
+      KEY ix_leave_requests_worker_dates (tenant_id, worker_id, status, start_date, end_date),
+      CONSTRAINT fk_leave_requests_worker_tenant FOREIGN KEY (worker_id, tenant_id) REFERENCES workers(id, tenant_id) ON DELETE CASCADE,
+      CONSTRAINT fk_leave_requests_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS attendance (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       tenant_id BIGINT UNSIGNED NOT NULL,

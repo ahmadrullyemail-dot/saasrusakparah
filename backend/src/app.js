@@ -53,6 +53,7 @@ const attendanceEvidenceUpload = multer({
 });
 const ATTENDANCE_ACTIVITIES = new Set(['check_in', 'check_out', 'off', 'permission', 'leave', 'sick']);
 const EMPLOYEE_REQUEST_TYPES = new Set(['off', 'permission', 'leave', 'sick']);
+const LEAVE_REQUEST_TYPES = new Set(['izin', 'cuti', 'sakit', 'off']);
 
 function profilePhotoUrl(user) {
   if (user.profile_photo_updated_at) return '/api/profile/photo';
@@ -268,6 +269,22 @@ function validDate(value) {
     && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value);
 }
 
+function validLeaveRequestInput(input) {
+  if (!input || typeof input !== 'object') return false;
+  const { type, start_date: startDate, end_date: endDate, reason } = input;
+  return LEAVE_REQUEST_TYPES.has(type)
+    && typeof startDate === 'string' && validDate(startDate)
+    && typeof endDate === 'string' && validDate(endDate)
+    && startDate <= endDate
+    && typeof reason === 'string'
+    && reason.trim().length >= 5
+    && reason.trim().length <= 1000;
+}
+
+function validLeaveRequestStatus(value) {
+  return value === 'approved' || value === 'rejected';
+}
+
 function validDocumentWarningThreshold(value) {
   return Number.isInteger(value) && value >= 1 && value <= 365;
 }
@@ -463,6 +480,26 @@ function attendanceTokenMatches(receivedToken, expectedToken, storedHash) {
     && crypto.timingSafeEqual(expectedHash, storedHash);
 }
 
+async function findWorkerForAttendanceToken(workerId, token) {
+  if (!validWorkerId(workerId) || !validAttendanceToken(token)) return null;
+  const [rows] = await pool.execute(
+    `SELECT w.id AS worker_id, w.tenant_id, s.token_salt, l.token_hash
+       FROM workers w
+       JOIN tenant_attendance_settings s ON s.tenant_id = w.tenant_id
+       JOIN worker_attendance_links l ON l.worker_id = w.id AND l.tenant_id = w.tenant_id
+      WHERE w.id = ? AND l.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL`,
+    [workerId]
+  );
+  const worker = rows[0];
+  if (!worker || !Buffer.isBuffer(worker.token_salt) || worker.token_salt.length !== 32
+    || !attendanceTokenMatches(
+      token,
+      createAttendanceToken(worker.tenant_id, worker.worker_id, worker.token_salt),
+      worker.token_hash
+    )) return null;
+  return { worker_id: String(worker.worker_id), tenant_id: String(worker.tenant_id) };
+}
+
 async function activeDocumentTypes(tenantId, connection = pool) {
   const [rows] = await connection.execute(
     'SELECT code FROM document_types WHERE tenant_id = ? AND is_active = 1',
@@ -553,6 +590,108 @@ function evaluateEligibility(worker, documents, today = new Date().toISOString()
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+app.post('/api/leaves', asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  const { worker_id: workerId, token, type, start_date: startDate, end_date: endDate, reason } = req.body || {};
+  if (!validWorkerId(workerId) || !validAttendanceToken(token)) {
+    return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+  }
+  if (!validLeaveRequestInput({ type, start_date: startDate, end_date: endDate, reason })) {
+    return res.status(400).json({
+      error: 'Provide a valid request type, date range, and reason of 5 to 1000 characters',
+    });
+  }
+  const worker = await findWorkerForAttendanceToken(workerId, token);
+  if (!worker) return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+
+  const connection = await pool.getConnection();
+  let insertedId;
+  try {
+    await connection.beginTransaction();
+    const [workerRows] = await connection.execute(
+      `SELECT full_name FROM workers
+        WHERE id = ? AND tenant_id = ? AND status = 'active' AND deleted_at IS NULL
+        FOR UPDATE`,
+      [worker.worker_id, worker.tenant_id]
+    );
+    if (!workerRows[0]) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+    }
+    const [conflicts] = await connection.execute(
+      `SELECT id FROM leave_requests
+        WHERE tenant_id = ? AND worker_id = ? AND status IN ('pending', 'approved')
+          AND start_date <= ? AND end_date >= ?
+        LIMIT 1 FOR UPDATE`,
+      [worker.tenant_id, worker.worker_id, endDate, startDate]
+    );
+    if (conflicts.length) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'A pending or approved request already covers part of these dates' });
+    }
+    const [result] = await connection.execute(
+      `INSERT INTO leave_requests (tenant_id, worker_id, \`type\`, start_date, end_date, reason)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [worker.tenant_id, worker.worker_id, type, startDate, endDate, reason.trim()]
+    );
+    insertedId = String(result.insertId);
+    await connection.execute(
+      `INSERT INTO audit_events
+         (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
+       VALUES (?, NULL, ?, 'worker', 'create', 'leave_request', ?, ?)`,
+      [
+        worker.tenant_id,
+        workerRows[0].full_name,
+        insertedId,
+        `Pengajuan ${type} untuk ${startDate} sampai ${endDate} dikirim.`,
+      ]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  publishTenantEvent(worker.tenant_id, 'leave_requests_updated', { action: 'create' });
+  publishTenantEvent(worker.tenant_id, 'dashboard_updated', { action: 'create' });
+  publishTenantEvent(worker.tenant_id, 'history_updated', { action: 'create' });
+  res.status(201).json({
+    data: {
+      id: insertedId,
+      worker_id: worker.worker_id,
+      type,
+      start_date: startDate,
+      end_date: endDate,
+      reason: reason.trim(),
+      status: 'pending',
+    },
+  });
+}));
+
+app.get('/api/leaves', asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  const { worker_id: workerId, token } = req.query;
+  const worker = await findWorkerForAttendanceToken(workerId, token);
+  if (!worker) return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+  const [rows] = await pool.execute(
+    `SELECT id, worker_id, \`type\`,
+            DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
+            DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
+            reason, status, created_at, reviewed_at
+       FROM leave_requests
+      WHERE tenant_id = ? AND worker_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 100`,
+    [worker.tenant_id, worker.worker_id]
+  );
+  res.json({
+    data: rows.map((row) => ({ ...row, id: String(row.id), worker_id: String(row.worker_id) })),
+  });
+}));
 
 app.get('/api/public/attendance', asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -1201,6 +1340,9 @@ app.use('/api', (req, res, next) => {
       publishTenantEvent(req.auth.tenantId, 'attendance_updated', payload);
       publishTenantEvent(req.auth.tenantId, 'dashboard_updated', payload);
       if (path.includes('/approval')) publishTenantEvent(req.auth.tenantId, 'approval_updated', payload);
+    } else if (path.startsWith('/api/leaves')) {
+      publishTenantEvent(req.auth.tenantId, 'leave_requests_updated', payload);
+      publishTenantEvent(req.auth.tenantId, 'dashboard_updated', payload);
     } else if (path.startsWith('/api/admin/document')) {
       publishTenantEvent(req.auth.tenantId, 'documents_updated', payload);
       publishTenantEvent(req.auth.tenantId, 'dashboard_updated', payload);
@@ -1214,6 +1356,78 @@ app.use('/api', (req, res, next) => {
   });
   next();
 });
+
+app.get('/api/leaves/pending', requireManager, asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT lr.id, lr.worker_id, w.full_name, w.position, lr.\`type\`,
+            DATE_FORMAT(lr.start_date, '%Y-%m-%d') AS start_date,
+            DATE_FORMAT(lr.end_date, '%Y-%m-%d') AS end_date,
+            lr.reason, lr.status, lr.created_at
+       FROM leave_requests lr
+       JOIN workers w ON w.id = lr.worker_id AND w.tenant_id = lr.tenant_id
+      WHERE lr.tenant_id = ? AND lr.status = 'pending' AND w.deleted_at IS NULL
+      ORDER BY lr.created_at ASC, lr.id ASC
+      LIMIT 100`,
+    [req.auth.tenantId]
+  );
+  res.json({
+    data: rows.map((row) => ({ ...row, id: String(row.id), worker_id: String(row.worker_id) })),
+  });
+}));
+
+app.put('/api/leaves/:id/status', requireManager, asyncRoute(async (req, res) => {
+  const requestId = req.params.id;
+  const { status } = req.body || {};
+  if (!validWorkerId(requestId) || !validLeaveRequestStatus(status)) {
+    return res.status(400).json({ error: 'Provide a valid request ID and status (approved or rejected)' });
+  }
+  const connection = await pool.getConnection();
+  let updatedRequest;
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      `SELECT lr.id, lr.worker_id, lr.status, lr.\`type\`, lr.start_date, lr.end_date, w.full_name
+         FROM leave_requests lr
+         JOIN workers w ON w.id = lr.worker_id AND w.tenant_id = lr.tenant_id
+        WHERE lr.id = ? AND lr.tenant_id = ? AND w.deleted_at IS NULL
+        FOR UPDATE`,
+      [requestId, req.auth.tenantId]
+    );
+    const request = rows[0];
+    if (!request) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Leave request not found' });
+    }
+    if (request.status !== 'pending') {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Leave request has already been reviewed' });
+    }
+    await connection.execute(
+      `UPDATE leave_requests
+          SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND tenant_id = ? AND status = 'pending'`,
+      [status, req.auth.userId, requestId, req.auth.tenantId]
+    );
+    await recordAudit(req, {
+      action: status === 'approved' ? 'approve' : 'reject',
+      entityType: 'leave_request',
+      entityId: requestId,
+      description: `Pengajuan ${request.type} milik ${request.full_name} untuk ${String(request.start_date).slice(0, 10)} sampai ${String(request.end_date).slice(0, 10)} ${status === 'approved' ? 'disetujui' : 'ditolak'}.`,
+    }, connection);
+    await connection.commit();
+    updatedRequest = {
+      id: String(request.id),
+      worker_id: String(request.worker_id),
+      status,
+    };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  res.json({ data: updatedRequest });
+}));
 
 app.get('/api/history', requireManager, asyncRoute(async (req, res) => {
   const requestedLimit = Number(req.query.limit || 100);
@@ -1788,7 +2002,15 @@ app.get('/api/dashboard', asyncRoute(async (req, res) => {
     `SELECT status, COUNT(*) AS total FROM workers WHERE tenant_id = ? AND deleted_at IS NULL GROUP BY status`,
     [req.auth.tenantId]
   );
-  const summary = { offered: 0, preactive: 0, active: 0, inactive: 0, expiring_documents: 0, pending_attendance_claims: 0 };
+  const summary = {
+    offered: 0,
+    preactive: 0,
+    active: 0,
+    inactive: 0,
+    expiring_documents: 0,
+    pending_attendance_claims: 0,
+    pending_leave_requests: 0,
+  };
   for (const row of counts) summary[row.status] = Number(row.total);
   const [settingsRows] = await pool.execute(
     `SELECT warning_threshold_days FROM tenant_document_settings WHERE tenant_id = ?`,
@@ -1820,6 +2042,13 @@ app.get('/api/dashboard', asyncRoute(async (req, res) => {
     [req.auth.tenantId]
   );
   summary.pending_attendance_claims = Number(pendingAttendance[0].total);
+  const [pendingLeaveRequests] = await pool.execute(
+    `SELECT COUNT(*) AS total FROM leave_requests lr
+       JOIN workers w ON w.tenant_id = lr.tenant_id AND w.id = lr.worker_id AND w.deleted_at IS NULL
+      WHERE lr.tenant_id = ? AND lr.status = 'pending'`,
+    [req.auth.tenantId]
+  );
+  summary.pending_leave_requests = Number(pendingLeaveRequests[0].total);
   summary.document_warning_threshold_days = warningThresholdDays;
   summary.document_warning_start_date = dateRows[0].warning_start_date;
   summary.document_warning_cutoff_date = dateRows[0].warning_cutoff_date;
@@ -2880,6 +3109,8 @@ module.exports = {
   app,
   evaluateEligibility,
   validDate,
+  validLeaveRequestInput,
+  validLeaveRequestStatus,
   validDocumentWarningThreshold,
   attendanceMonthRange,
   validRequiredDocuments,

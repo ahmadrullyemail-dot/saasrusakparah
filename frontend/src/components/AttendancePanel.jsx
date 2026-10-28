@@ -1,7 +1,7 @@
 import { attendanceMonthLabel, attendanceMonthSummary, attendanceStatusLabel, formatAttendanceTime, formatCoordinate, monthlyAttendanceCode } from '../lib/hrd.js';
 import { Icon } from './Icon.jsx';
 
-export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLinks, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, createAttendanceLink, copyAttendanceLink, decideAttendanceRequest, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, reviewingAttendance, saveAttendanceStatus, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance, revokeAttendanceLink }) {
+export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLinks, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, createAttendanceLink, copyAttendanceLink, decideAttendanceRequest, decideLeaveRequest, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance, revokeAttendanceLink }) {
   return (
 <section
           className="panel attendance-panel"
@@ -74,6 +74,41 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
                 ))}
               </div>
             ) : <p className="attendance-approval-empty">Tidak ada klaim presensi yang menunggu persetujuan pada {attendanceMonthLabel(attendanceMonth)}.</p>}
+            {['admin', 'hr_manager'].includes(user.role) && (
+              <div className="attendance-leave-approval">
+                <div className="attendance-subsection-heading">
+                  <div><p className="eyebrow">PERMOHONAN RENTANG TANGGAL</p><h4>Pengajuan izin, cuti, sakit, dan off</h4></div>
+                  <span className={`count-pill ${pendingLeaveRequests.length ? 'pending-count' : ''}`}>
+                    {pendingLeaveRequestsLoading ? 'Memuat…' : `${pendingLeaveRequests.length} pending`}
+                  </span>
+                </div>
+                {pendingLeaveRequestsLoading ? <p className="muted">Memuat antrean pengajuan…</p>
+                  : pendingLeaveRequests.length ? (
+                    <div className="attendance-approval-list">
+                      {pendingLeaveRequests.map((request) => (
+                        <article className="attendance-approval-card leave-approval-card" key={request.id}>
+                          <div className="attendance-approval-worker">
+                            <span className="attendance-approval-avatar">{request.full_name.trim().slice(0, 1).toUpperCase()}</span>
+                            <div>
+                              <strong className="uppercase-text">{request.full_name}</strong>
+                              <span className="uppercase-text">{request.position}</span>
+                            </div>
+                          </div>
+                          <div className="attendance-approval-details">
+                            <span className="attendance-type-badge">{({ izin: 'Izin', cuti: 'Cuti', sakit: 'Sakit', off: 'Off' })[request.type]}</span>
+                            <span>{request.start_date} – {request.end_date}</span>
+                            <span className="leave-approval-reason">{request.reason}</span>
+                          </div>
+                          <div className="leave-approval-actions">
+                            <button className="button primary" type="button" disabled={busy} onClick={() => decideLeaveRequest(request.id, 'approved')}>Setujui</button>
+                            <button className="button danger" type="button" disabled={busy} onClick={() => decideLeaveRequest(request.id, 'rejected')}>Tolak</button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : <p className="attendance-approval-empty">Tidak ada pengajuan pekerja yang menunggu keputusan.</p>}
+              </div>
+            )}
           </section>
 
           <section className="attendance-monthly-matrix" aria-labelledby="attendance-matrix-heading">

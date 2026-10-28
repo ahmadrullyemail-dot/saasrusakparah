@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const {
   evaluateEligibility,
   validDate,
+  validLeaveRequestInput,
+  validLeaveRequestStatus,
   validDocumentWarningThreshold,
   attendanceMonthRange,
   validRequiredDocuments,
@@ -138,6 +140,25 @@ test('date and required-document input validation rejects invalid values', () =>
   assert.equal(validRequiredDocuments(['invalid type']), false);
   assert.equal(validRequiredDocuments(['mcu', 'mcu']), false);
   assert.equal(validRequiredDocuments([]), true);
+});
+
+test('leave requests require a supported type, real ordered dates, and a concise reason', () => {
+  const validRequest = {
+    type: 'cuti',
+    start_date: '2026-10-29',
+    end_date: '2026-10-31',
+    reason: 'Keperluan keluarga',
+  };
+  assert.equal(validLeaveRequestInput(validRequest), true);
+  assert.equal(validLeaveRequestInput(null), false);
+  assert.equal(validLeaveRequestInput({ ...validRequest, type: 'dinas' }), false);
+  assert.equal(validLeaveRequestInput({ ...validRequest, start_date: '2026-02-30' }), false);
+  assert.equal(validLeaveRequestInput({ ...validRequest, start_date: '2026-11-01' }), false);
+  assert.equal(validLeaveRequestInput({ ...validRequest, reason: 'izin' }), false);
+  assert.equal(validLeaveRequestInput({ ...validRequest, reason: 'x'.repeat(1001) }), false);
+  assert.equal(validLeaveRequestStatus('approved'), true);
+  assert.equal(validLeaveRequestStatus('rejected'), true);
+  assert.equal(validLeaveRequestStatus('pending'), false);
 });
 
 test('document dates are normalized by selected status', () => {

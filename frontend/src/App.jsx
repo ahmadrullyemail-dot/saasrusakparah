@@ -46,6 +46,8 @@ function WorkspaceApp() {
   const [activityHistory, setActivityHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [pendingLeaveRequests, setPendingLeaveRequests] = useState([]);
+  const [pendingLeaveRequestsLoading, setPendingLeaveRequestsLoading] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -92,6 +94,14 @@ function WorkspaceApp() {
   }, [user]);
 
   useEffect(() => {
+    if (!user || !['admin', 'hr_manager'].includes(user.role)) {
+      setPendingLeaveRequests([]);
+      return;
+    }
+    refreshPendingLeaveRequests().catch(showError);
+  }, [user]);
+
+  useEffect(() => {
     if (!user) return undefined;
     const socket = io({
       withCredentials: true,
@@ -104,6 +114,9 @@ function WorkspaceApp() {
       realtimeRefreshTimerRef.current = window.setTimeout(async () => {
         try {
           const refreshTasks = [refreshDashboard(), refreshWorkers(), refreshSubscription()];
+          if (['admin', 'hr_manager'].includes(user.role)) {
+            refreshTasks.push(refreshPendingLeaveRequests());
+          }
           const current = realtimeContextRef.current;
           if (['documents_updated', 'settings_updated'].includes(eventName)) {
             refreshTasks.push(refreshDocumentTypes());
@@ -150,6 +163,7 @@ function WorkspaceApp() {
       'worker_changed',
       'attendance_updated',
       'approval_updated',
+      'leave_requests_updated',
       'documents_updated',
       'dashboard_updated',
       'settings_updated',
@@ -274,6 +288,15 @@ function WorkspaceApp() {
 
   async function refreshDashboard() {
     setSummary(await api('/dashboard'));
+  }
+
+  async function refreshPendingLeaveRequests() {
+    setPendingLeaveRequestsLoading(true);
+    try {
+      setPendingLeaveRequests(await api('/leaves/pending'));
+    } finally {
+      setPendingLeaveRequestsLoading(false);
+    }
   }
 
   async function refreshSubscription() {
@@ -416,6 +439,26 @@ function WorkspaceApp() {
       setAttendanceData(data);
       setMonthlyAttendance(monthlyData);
       setNotice(decision === 'approve' ? 'Pengajuan presensi disetujui.' : 'Pengajuan presensi ditolak.');
+      return true;
+    } catch (requestError) {
+      showError(requestError);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decideLeaveRequest(requestId, status) {
+    setError('');
+    setNotice('');
+    setBusy(true);
+    try {
+      await api(`/leaves/${encodeURIComponent(requestId)}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      });
+      await Promise.all([refreshPendingLeaveRequests(), refreshDashboard()]);
+      setNotice(status === 'approved' ? 'Pengajuan berhasil disetujui.' : 'Pengajuan berhasil ditolak.');
       return true;
     } catch (requestError) {
       showError(requestError);
@@ -1115,6 +1158,8 @@ function WorkspaceApp() {
     () => monthlyAttendance.records.filter((record) => record.attendance_id && record.approval_status === 'pending'),
     [monthlyAttendance.records]
   );
+  const pendingApprovalCount = Number(summary?.pending_attendance_claims || 0)
+    + Number(summary?.pending_leave_requests || 0);
   const totalMonthlyLogs = monthlyAttendance.records.filter((record) => record.attendance_id).length;
   const monthlyCheckedIns = monthlyAttendance.records.filter((record) => record.check_in_time).length;
   const monthlyPageCount = Math.max(1, Math.ceil(filteredMonthlyWorkers.length / attendancePageSize));
@@ -1339,19 +1384,46 @@ function WorkspaceApp() {
               <p className="eyebrow">TINJAUAN HR</p>
               <h3 id="dashboard-approval-heading">Pusat Persetujuan</h3>
               <p className="muted">
-                {summary?.pending_attendance_claims
-                  ? 'Klaim presensi menunggu pemeriksaan Admin.'
-                  : 'Tidak ada klaim presensi yang menunggu tinjauan.'}
+                {pendingApprovalCount
+                  ? `${summary?.pending_attendance_claims || 0} klaim presensi dan ${summary?.pending_leave_requests || 0} pengajuan pekerja menunggu tinjauan.`
+                  : 'Tidak ada klaim presensi atau pengajuan pekerja yang menunggu tinjauan.'}
               </p>
             </div>
-            <div className={`dashboard-approval-count ${summary?.pending_attendance_claims ? 'has-pending' : ''}`}>
-              <strong>{summary?.pending_attendance_claims ?? '—'}</strong>
+            <div className={`dashboard-approval-count ${pendingApprovalCount ? 'has-pending' : ''}`}>
+              <strong>{summary ? pendingApprovalCount : '—'}</strong>
               <span>pending</span>
             </div>
             <button className="button secondary dashboard-approval-action" type="button" onClick={() => setActiveTab('attendance')}>
-              {summary?.pending_attendance_claims ? 'Tinjau klaim' : 'Buka presensi'}
+              {pendingApprovalCount ? 'Buka tinjauan HR' : 'Buka presensi'}
               <span aria-hidden="true">→</span>
             </button>
+            {['admin', 'hr_manager'].includes(user.role) && (
+              <div className="dashboard-leave-requests">
+                <div className="dashboard-leave-heading">
+                  <strong>Pengajuan izin, cuti, sakit, dan off</strong>
+                  <span>{pendingLeaveRequestsLoading ? 'Memuat…' : `${pendingLeaveRequests.length} pending`}</span>
+                </div>
+                {pendingLeaveRequestsLoading ? <p className="muted">Memuat antrean pengajuan…</p>
+                  : pendingLeaveRequests.length ? pendingLeaveRequests.slice(0, 4).map((request) => (
+                    <article className="dashboard-leave-item" key={request.id}>
+                      <div className="dashboard-leave-item-copy">
+                        <strong className="uppercase-text">{request.full_name}</strong>
+                        <span>{({ izin: 'Izin', cuti: 'Cuti', sakit: 'Sakit', off: 'Off' })[request.type]} · {request.start_date} – {request.end_date}</span>
+                        <small>{request.reason}</small>
+                      </div>
+                      <div className="dashboard-leave-actions">
+                        <button className="button primary" type="button" disabled={busy} onClick={() => decideLeaveRequest(request.id, 'approved')}>Setujui</button>
+                        <button className="button danger" type="button" disabled={busy} onClick={() => decideLeaveRequest(request.id, 'rejected')}>Tolak</button>
+                      </div>
+                    </article>
+                  )) : <p className="dashboard-leave-empty">Tidak ada pengajuan pekerja yang menunggu keputusan.</p>}
+                {pendingLeaveRequests.length > 4 && (
+                  <button className="dashboard-leave-more" type="button" onClick={() => setActiveTab('attendance')}>
+                    Lihat {pendingLeaveRequests.length - 4} pengajuan lainnya
+                  </button>
+                )}
+              </div>
+            )}
           </section>
           {/*<section className="dashboard-actions" aria-label="Aksi cepat">
             <div>
@@ -1466,6 +1538,7 @@ function WorkspaceApp() {
           createAttendanceLink={createAttendanceLink}
           copyAttendanceLink={copyAttendanceLink}
           decideAttendanceRequest={decideAttendanceRequest}
+          decideLeaveRequest={decideLeaveRequest}
           filteredMonthlyWorkers={filteredMonthlyWorkers}
           monthlyAttendanceLoading={monthlyAttendanceLoading}
           monthlyCheckedIns={monthlyCheckedIns}
@@ -1473,6 +1546,8 @@ function WorkspaceApp() {
           monthlyPageCount={monthlyPageCount}
           monthlyWorkerRows={monthlyWorkerRows}
           pendingAttendanceApprovals={pendingAttendanceApprovals}
+          pendingLeaveRequests={pendingLeaveRequests}
+          pendingLeaveRequestsLoading={pendingLeaveRequestsLoading}
           reviewingAttendance={reviewingAttendance}
           saveAttendanceStatus={saveAttendanceStatus}
           selectMatrixAttendanceDate={selectMatrixAttendanceDate}

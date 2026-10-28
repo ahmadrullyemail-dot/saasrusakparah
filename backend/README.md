@@ -18,7 +18,7 @@ API SaaS HRD menggunakan Node.js, Express, dan MySQL. Data dipisahkan per tenant
 
 Saat startup, server menjalankan `CREATE DATABASE IF NOT EXISTS`, membuat tabel yang belum ada, serta menambahkan kolom akun/pekerja dan jenis dokumen yang diperlukan ke skema lama. Perubahan skema ini tidak menghapus data. Sintaks kolom generated untuk batas unik log presensi dipilih berdasarkan produk server (`PERSISTENT` pada MariaDB, `STORED` pada MySQL) agar kompatibel dengan versi MariaDB yang tidak menerima alias `STORED`. Tidak ada akun, tenant, pekerja, ataupun dokumen yang di-seed. Pengguna pertama membuat tenant dan akun admin melalui formulir pendaftaran. Email pengguna harus unik secara global sampai dukungan satu akun untuk beberapa tenant tersedia; indeks unik memakai hash SHA-256 biner agar tetap di bawah batas panjang kunci MySQL lama. Daftar jenis dokumen wajib disimpan sebagai JSON dalam kolom `LONGTEXT` agar kompatibel dengan MariaDB lama.
 
-Server HTTP juga menyediakan Socket.IO di `/socket.io`. Koneksi memakai cookie sesi HttpOnly, hanya bergabung ke room tenant yang diambil dari sesi valid, dan diperiksa ulang untuk pencabutan sesi. Mutasi API yang berhasil dan presensi publik yang commit memancarkan event ringkas untuk menyegarkan UI tenant terkait. Jangan menerima room/tenant dari parameter client; pengiriman data operasional tetap melalui endpoint API ber-RBAC.
+Server HTTP juga menyediakan Socket.IO di `/socket.io`. Koneksi memakai cookie sesi HttpOnly, hanya bergabung ke room tenant yang diambil dari sesi valid, dan diperiksa ulang untuk pencabutan sesi. Mutasi API yang berhasil serta presensi dan pengajuan publik yang commit memancarkan event ringkas untuk menyegarkan UI tenant terkait. Jangan menerima room/tenant dari parameter client; pengiriman data operasional tetap melalui endpoint API ber-RBAC.
 
 Bootstrap ini untuk database baru dan tidak mengubah skema/tabel yang sudah ada. Data pada SQLite lama tidak digunakan atau dimigrasikan.
 
@@ -39,7 +39,9 @@ API berjalan di port 4000 secara default. Vite meneruskan `/api` dan `/socket.io
 - `POST /api/auth/reset-password` — menerima token sekali pakai dan kata sandi baru (12–72 byte UTF-8); token disimpan sebagai hash, berlaku 30 menit, dan perubahan mencabut semua sesi.
 - `PATCH /api/profile`, `POST /api/profile/photo`, `GET /api/profile/photo`, `PATCH /api/profile/password`
 - `GET /api/admin/users`, `POST /api/admin/users`, `PATCH /api/admin/users/:id`, `POST /api/admin/users/:id/reset-password` (Admin-only)
-- `GET /api/dashboard` — metrik status pekerja, dokumen yang perlu ditindaklanjuti, dan klaim presensi pending untuk tenant aktif
+- `GET /api/dashboard` — metrik status pekerja, dokumen yang perlu ditindaklanjuti, klaim presensi pending, dan pengajuan izin/cuti/sakit/off pending untuk tenant aktif
+- `POST /api/leaves`, `GET /api/leaves?worker_id=...&token=...` — pengajuan rentang izin/cuti/sakit/off dan riwayat pekerja; link presensi HMAC aktif diperlukan untuk portal pekerja
+- `GET /api/leaves/pending`, `PUT /api/leaves/:id/status` — antrean dan keputusan pengajuan tenant-scoped untuk Admin/HR Staff
 - `GET /api/admin/document-settings`, `PATCH /api/admin/document-settings` — baca/simpan default ambang pemantauan masa berlaku dokumen per tenant (1–365 hari; default 30; Admin-only); nilai ini menjadi fallback jenis dokumen.
 - `GET /api/admin/attendance-settings`, `POST /api/admin/attendance-settings/salt` — cek status/generate/rotasi salt perusahaan (Admin-only).
 - `PATCH /api/admin/attendance-settings` — mengaktifkan atau menonaktifkan Anti-Mock Location untuk tenant (Admin-only).
@@ -49,7 +51,8 @@ API berjalan di port 4000 secara default. Vite meneruskan `/api` dan `/socket.io
 - `PATCH /api/attendance/:workerId/status`, `PATCH /api/attendance/:workerId/approval` — perubahan status manual dan persetujuan hanya Admin.
 - `GET /api/attendance/:workerId/evidence?date=YYYY-MM-DD` — foto bukti presensi untuk role terautentikasi tenant.
 - `POST /api/workers/:id/attendance-link` — buat/ambil tautan (Admin/HR Staff); `DELETE /api/workers/:id/attendance-link` — cabut tautan (Admin-only).
-- `GET /api/public/attendance?worker_id=...&token=...`, `POST /api/public/attendance` — halaman publik memvalidasi link HMAC, aturan lokasi/radius, pengajuan status, dan check-in/out.
+- `GET /api/public/attendance?worker_id=...&token=...`, `POST /api/public/attendance` — halaman publik memvalidasi link HMAC, aturan lokasi/radius, pengajuan status presensi, dan clock in/out.
+- Tabel `leave_requests` dibuat otomatis saat startup. Permohonan tidak boleh tumpang-tindih dengan permohonan pending atau approved lain milik pekerja; keputusan HR dicatat pada audit log.
 - `GET /api/workers`, `POST /api/workers`, `GET /api/workers/:id`
 - `PATCH /api/workers/:id` — ubah data pekerja dan persyaratan dokumen, Admin-only.
 - `POST /api/admin/workers/import` — terima hingga 500 baris pekerja sebagai JSON, Admin-only; file Excel diproses client-side dan tidak disimpan di server.

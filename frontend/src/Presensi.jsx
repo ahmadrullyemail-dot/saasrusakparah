@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from './components/Icon.jsx';
 
 const NAV_ITEMS = [
@@ -53,6 +53,54 @@ function distanceInMeters(latitude1, longitude1, latitude2, longitude2) {
     + Math.cos(radians(latitude1)) * Math.cos(radians(latitude2))
     * Math.sin(deltaLongitude / 2) ** 2;
   return 12742000 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+function getAttendanceAction(attendance, activity) {
+  const checkingOut = Boolean(attendance.check_in_time)
+    && attendance.approval_status !== 'rejected';
+  const selectedActivity = checkingOut ? (attendance.attendance_type || 'regular') : activity;
+  const action = checkingOut
+    ? 'check_out'
+    : ['regular', 'dinas'].includes(selectedActivity) ? 'check_in' : 'request_status';
+  return { action, selectedActivity };
+}
+
+function inspectAttendanceLocation(location, attendance, action, selectedActivity) {
+  if (attendance.anti_mock_location_enabled) {
+    if (location.isMocked) {
+      return { allowed: false, status: 'Lokasi terdeteksi sebagai mock' };
+    }
+    if (!Number.isFinite(location.accuracy) || location.accuracy <= 0 || location.accuracy > 1000) {
+      return { allowed: false, status: 'Akurasi lokasi di atas 1.000 meter' };
+    }
+    if (location.speed != null && (!Number.isFinite(location.speed) || location.speed < 0 || location.speed > 300)) {
+      return { allowed: false, status: 'Sinyal kecepatan tidak valid' };
+    }
+  }
+
+  if (selectedActivity === 'dinas') {
+    return { allowed: true, status: 'Dinas · tidak memerlukan geofence' };
+  }
+
+  const requiredActivity = action === 'request_status' ? selectedActivity : action;
+  const requiredLocations = (attendance.locations || []).filter((candidate) =>
+    candidate.allowed_activities.includes(requiredActivity));
+  if (!requiredLocations.length) {
+    return { allowed: true, status: 'Tidak ada geofence wajib untuk aktivitas ini' };
+  }
+
+  const matchingLocation = requiredLocations.find((candidate) => distanceInMeters(
+    location.latitude,
+    location.longitude,
+    candidate.latitude,
+    candidate.longitude
+  ) <= candidate.radius_meters);
+  return matchingLocation
+    ? { allowed: true, status: `Dalam radius · ${matchingLocation.name}` }
+    : {
+      allowed: false,
+      status: `Di luar area wajib · ${requiredLocations.map((candidate) => candidate.name).join(', ')}`,
+    };
 }
 
 async function compressEvidenceImage(file) {
@@ -126,16 +174,57 @@ async function publicAttendanceRequest(path, options) {
   return result.data;
 }
 
+async function publicLeaveRequest(path, options = {}) {
+  const response = await fetch(`/api/leaves${path}`, {
+    ...options,
+    cache: 'no-store',
+    headers: {
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers,
+    },
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Pengajuan tidak dapat diproses.');
+  return result.data;
+}
+
+function leaveTypeLabel(type) {
+  return { izin: 'Izin', cuti: 'Cuti', sakit: 'Sakit', off: 'Off' }[type] || type;
+}
+
+function leaveStatusLabel(status) {
+  return { pending: 'Pending', approved: 'Disetujui', rejected: 'Ditolak' }[status] || status;
+}
+
+function formatLeaveDate(value) {
+  return new Date(`${value}T12:00:00+07:00`).toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Jakarta',
+  });
+}
+
 function NavigationIcon({ name }) {
   const icons = { request: 'fileCheck', history: 'history', timer: 'clock', auto: 'refresh', account: 'user' };
   return <Icon name={icons[name]} />;
 }
 
-function ActionButton({ action, busy, disabled, onClick }) {
+function ActionButton({ action, busy, busyLabel = 'Mengirim...', disabled, onClick }) {
+  const label = action.startsWith('Ajukan ')
+    ? action
+    : action === 'check_in' ? 'Clock In' : 'Clock Out';
   return (
-    <button className="button primary attendance-action" type="button" disabled={busy || disabled} onClick={onClick}>
-      <span className="attendance-action-icon"><NavigationIcon name="timer" /></span>
-      <span>{busy ? 'Memproses presensi...' : action.startsWith('Ajukan ') ? action : action === 'check_in' ? 'Check-In / Hadir' : 'Check-Out'}</span>
+    <button
+      className={`button primary attendance-action ${action === 'check_in' ? 'attendance-action-clock-in' : action === 'check_out' ? 'attendance-action-clock-out' : 'attendance-action-request'}`}
+      type="button"
+      disabled={busy || disabled}
+      onClick={onClick}
+    >
+      <span className="attendance-action-icon">
+        {busy ? <span className="attendance-spinner" aria-hidden="true" /> : <NavigationIcon name="timer" />}
+      </span>
+      <span>{busy ? busyLabel : label}</span>
     </button>
   );
 }
@@ -153,6 +242,11 @@ function TimerPanel({
   onActivityChange,
   evidenceFile,
   onEvidenceChange,
+  confirmation,
+  locationChecking,
+  onConfirm,
+  onCancel,
+  onRetryLocation,
 }) {
   const hasCheckIn = Boolean(attendance.check_in_time);
   const hasCheckOut = Boolean(attendance.check_out_time);
@@ -218,18 +312,18 @@ function TimerPanel({
           <div className="attendance-empty-log">
             <span className="attendance-empty-icon"><NavigationIcon name="history" /></span>
             <span>Belum Ada Presensi Hari Ini</span>
-            <small>Check-in untuk mencatat kehadiranmu.</small>
+            <small>Clock In untuk mencatat kehadiranmu.</small>
           </div>
         ) : (
           <div className="attendance-timeline">
             <div className={`attendance-timeline-item ${hasCheckIn ? 'complete' : ''}`}>
               <span className="attendance-timeline-icon"><Icon name={hasCheckIn ? 'checkCircle' : 'clock'} size={17} /></span>
-              <span><strong>Check-In</strong><small>{hasCheckIn ? formatTime(attendance.check_in_time) : 'Belum dilakukan'}</small></span>
+              <span><strong>Clock In</strong><small>{hasCheckIn ? formatTime(attendance.check_in_time) : 'Belum dilakukan'}</small></span>
               {hasCheckIn && <span className="attendance-timeline-value"><Icon name="check" size={13} /> Tercatat</span>}
             </div>
             <div className={`attendance-timeline-item ${hasCheckOut ? 'complete' : ''}`}>
               <span className="attendance-timeline-icon"><Icon name={hasCheckOut ? 'checkCircle' : 'clock'} size={17} /></span>
-              <span><strong>Check-Out</strong><small>{hasCheckOut ? formatTime(attendance.check_out_time) : 'Belum dilakukan'}</small></span>
+              <span><strong>Clock Out</strong><small>{hasCheckOut ? formatTime(attendance.check_out_time) : 'Belum dilakukan'}</small></span>
               {hasCheckOut && <span className="attendance-timeline-value"><Icon name="check" size={13} /> Tercatat</span>}
             </div>
           </div>
@@ -255,7 +349,7 @@ function TimerPanel({
           )}
           {isDinas ? (
             <>
-              <div className="attendance-dinas-note">Dinas dapat dicatat di luar area kantor dan wajib dilengkapi foto bukti saat Check-In.</div>
+              <div className="attendance-dinas-note">Dinas dapat dicatat di luar area kantor dan wajib dilengkapi foto bukti saat Clock In.</div>
               {action !== 'check_out' && (
                 <label className="attendance-form-field">Foto bukti Dinas (JPG/PNG)
                   <input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(event) => onEvidenceChange(event.currentTarget.files?.[0] || null)} />
@@ -279,7 +373,8 @@ function TimerPanel({
             action={action === 'request_status'
               ? `Ajukan ${statusText(activity, false)}`
               : action}
-            busy={busy}
+            busy={busy || locationChecking}
+            busyLabel={locationChecking ? 'Memeriksa lokasi...' : 'Mengirim...'}
             disabled={isDinas ? action !== 'check_out' && !evidenceFile : false}
             onClick={onAction}
           />
@@ -291,7 +386,78 @@ function TimerPanel({
             ? 'Pengajuan sudah diterima dan menunggu persetujuan HR.'
             : attendance.approval_status === 'rejected'
               ? 'Pengajuan ditolak. Pilih aktivitas untuk mengirim pengajuan ulang.'
-              : hasCheckOut ? 'Presensi hari ini sudah lengkap.' : hasCheckIn ? 'Check-in hari ini sudah tercatat.' : 'Status presensi hari ini sudah dicatat.'}
+              : hasCheckOut ? 'Presensi hari ini sudah lengkap.' : hasCheckIn ? 'Clock In hari ini sudah tercatat.' : 'Status presensi hari ini sudah dicatat.'}
+        </div>
+      )}
+      {confirmation && (
+        <div
+          className="attendance-confirm-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy && !locationChecking) onCancel();
+          }}
+        >
+          <section
+            className="attendance-confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="attendance-confirm-title"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && !busy && !locationChecking) onCancel();
+            }}
+          >
+            <header className="attendance-confirm-heading">
+              <span className={`attendance-confirm-icon ${confirmation.action === 'check_in' ? 'clock-in' : confirmation.action === 'check_out' ? 'clock-out' : ''}`}>
+                <NavigationIcon name="timer" />
+              </span>
+              <div>
+                <p className="eyebrow">KONFIRMASI PRESENSI</p>
+                <h2 id="attendance-confirm-title">
+                  {confirmation.action === 'check_in' ? 'Konfirmasi Clock In'
+                    : confirmation.action === 'check_out' ? 'Konfirmasi Clock Out'
+                      : `Konfirmasi ${statusText(confirmation.selectedActivity, false)}`}
+                </h2>
+              </div>
+            </header>
+            <div className="attendance-confirm-details">
+              <div><span>Waktu sistem · WIB</span><strong>{currentTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jakarta' })}</strong></div>
+              <div>
+                <span>Status lokasi &amp; geofence</span>
+                {locationChecking
+                  ? <strong className="attendance-confirm-location checking"><span className="attendance-spinner" aria-hidden="true" /> Memeriksa lokasi...</strong>
+                  : confirmation.locationCheck
+                    ? <strong className={`attendance-confirm-location ${confirmation.locationCheck.allowed ? 'allowed' : 'blocked'}`}>{confirmation.locationCheck.status}</strong>
+                    : <strong className="attendance-confirm-location blocked">{confirmation.locationError || 'Lokasi belum tersedia'}</strong>}
+              </div>
+              {confirmation.selectedActivity === 'dinas' && confirmation.action === 'check_in' && (
+                <div><span>Bukti Dinas</span><strong>{evidenceFile ? evidenceFile.name : 'Foto bukti belum dipilih'}</strong></div>
+              )}
+            </div>
+            <p className="attendance-confirm-note">
+              {confirmation.selectedActivity === 'dinas'
+                ? 'Dinas tidak dibatasi geofence. Lokasi dan bukti yang dipilih akan dikirim untuk ditinjau HR.'
+                : 'Pastikan waktu dan status lokasi sudah sesuai. Server tetap memvalidasi aturan presensi sebelum menyimpan data.'}
+            </p>
+            {confirmation.locationError && !locationChecking && (
+              <button className="button secondary attendance-confirm-retry" type="button" onClick={onRetryLocation}>
+                Coba periksa lokasi lagi
+              </button>
+            )}
+            <div className="attendance-confirm-actions">
+              <button className="button secondary" type="button" disabled={busy || locationChecking} onClick={onCancel} autoFocus>Batal</button>
+              <button
+                className={`button primary attendance-confirm-submit ${confirmation.action === 'check_in' ? 'clock-in' : confirmation.action === 'check_out' ? 'clock-out' : ''}`}
+                type="button"
+                disabled={busy || locationChecking || !confirmation.location || !confirmation.locationCheck?.allowed || (confirmation.selectedActivity === 'dinas' && confirmation.action === 'check_in' && !evidenceFile)}
+                onClick={onConfirm}
+              >
+                {busy
+                  ? <><span className="attendance-spinner" aria-hidden="true" /> Mengirim...</>
+                  : confirmation.action === 'check_in' ? 'Konfirmasi Clock In'
+                    : confirmation.action === 'check_out' ? 'Konfirmasi Clock Out'
+                      : 'Kirim Pengajuan'}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </>
@@ -319,8 +485,8 @@ function HistoryPanel({ records }) {
                   : `${statusText(record.status, Boolean(record.check_in_time))}${record.approval_status === 'rejected' ? ' · Ditolak' : ''}`}</small>
               </div>
               <div className="attendance-history-times">
-                <span>Masuk <strong>{formatTime(record.check_in_time)}</strong></span>
-                <span>Pulang <strong>{formatTime(record.check_out_time)}</strong></span>
+                <span>Clock In <strong>{formatTime(record.check_in_time)}</strong></span>
+                <span>Clock Out <strong>{formatTime(record.check_out_time)}</strong></span>
               </div>
             </article>
           ))}
@@ -335,6 +501,8 @@ export default function Presensi() {
   const [attendance, setAttendance] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [locationChecking, setLocationChecking] = useState(false);
+  const [confirmation, setConfirmation] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [locationWarning, setLocationWarning] = useState('');
@@ -342,6 +510,15 @@ export default function Presensi() {
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [activity, setActivity] = useState('regular');
   const [evidenceFile, setEvidenceFile] = useState(null);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [leaveRequestsLoading, setLeaveRequestsLoading] = useState(true);
+  const [leaveSubmitting, setLeaveSubmitting] = useState(false);
+  const [leaveError, setLeaveError] = useState('');
+  const [leaveNotice, setLeaveNotice] = useState('');
+  const [leaveForm, setLeaveForm] = useState({ type: 'izin', start_date: '', end_date: '', reason: '' });
+  const actionLockRef = useRef(false);
+  const confirmationSubmitLockRef = useRef(false);
+  const leaveSubmitLockRef = useRef(false);
   const [{ token, workerId }] = useState(() => {
     const parameters = new URLSearchParams(window.location.search);
     return {
@@ -359,27 +536,116 @@ export default function Presensi() {
     if (!token || !workerId) {
       setError('Link presensi tidak valid. Gunakan tautan resmi dari HR perusahaan.');
       setLoading(false);
+      setLeaveRequestsLoading(false);
       return;
     }
     publicAttendanceRequest(`?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}`)
       .then(setAttendance)
       .catch((requestError) => setError(requestError.message))
       .finally(() => setLoading(false));
+    publicLeaveRequest(`?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}`)
+      .then((requests) => {
+        if (!leaveSubmitLockRef.current) setLeaveRequests(requests);
+      })
+      .catch((requestError) => setLeaveError(requestError.message))
+      .finally(() => setLeaveRequestsLoading(false));
   }, [token, workerId]);
 
-  async function recordAttendance() {
-    const checkingOut = Boolean(attendance.check_in_time)
-      && attendance.approval_status !== 'rejected';
-    const selectedActivity = checkingOut ? (attendance.attendance_type || 'regular') : activity;
-    const action = checkingOut
-      ? 'check_out'
-      : ['regular', 'dinas'].includes(selectedActivity) ? 'check_in' : 'request_status';
-    setBusy(true);
+  async function submitLeaveRequest(event) {
+    event.preventDefault();
+    if (leaveSubmitLockRef.current || leaveSubmitting) return;
+    if (!leaveForm.start_date || !leaveForm.end_date || leaveForm.start_date > leaveForm.end_date
+      || leaveForm.reason.trim().length < 5) {
+      setLeaveError('Isi rentang tanggal yang valid dan alasan minimal 5 karakter.');
+      return;
+    }
+    leaveSubmitLockRef.current = true;
+    setLeaveSubmitting(true);
+    setLeaveError('');
+    setLeaveNotice('');
+    try {
+      await publicLeaveRequest('', {
+        method: 'POST',
+        body: JSON.stringify({
+          worker_id: workerId,
+          token,
+          ...leaveForm,
+          reason: leaveForm.reason.trim(),
+        }),
+      });
+      setLeaveForm({ type: 'izin', start_date: '', end_date: '', reason: '' });
+      setLeaveNotice('Pengajuan berhasil dikirim dan sedang menunggu tinjauan HR.');
+      try {
+        const requests = await publicLeaveRequest(
+          `?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}`
+        );
+        setLeaveRequests(requests);
+      } catch (historyError) {
+        setLeaveError(`Pengajuan berhasil dikirim, tetapi riwayat belum dapat dimuat: ${historyError.message}`);
+      }
+    } catch (requestError) {
+      setLeaveError(requestError.message);
+    } finally {
+      leaveSubmitLockRef.current = false;
+      setLeaveSubmitting(false);
+    }
+  }
+
+  async function checkConfirmationLocation(actionContext) {
+    setLocationChecking(true);
+    setConfirmation((current) => current && ({ ...current, location: null, locationCheck: null, locationError: '' }));
+    try {
+      const location = await requestLocation();
+      const locationCheck = inspectAttendanceLocation(
+        location,
+        attendance,
+        actionContext.action,
+        actionContext.selectedActivity
+      );
+      setConfirmation((current) => current && ({
+        ...current,
+        location,
+        locationCheck,
+        locationError: '',
+      }));
+    } catch (locationError) {
+      setConfirmation((current) => current && ({
+        ...current,
+        location: null,
+        locationCheck: null,
+        locationError: locationError.message,
+      }));
+    } finally {
+      setLocationChecking(false);
+    }
+  }
+
+  function openActionConfirmation() {
+    if (actionLockRef.current || busy || !attendance) return;
+    const actionContext = getAttendanceAction(attendance, activity);
+    if (actionContext.action === 'check_in'
+      && actionContext.selectedActivity === 'dinas'
+      && !evidenceFile) {
+      setError('Pilih foto bukti Dinas sebelum Clock In.');
+      return;
+    }
+    actionLockRef.current = true;
     setError('');
     setNotice('');
     setLocationWarning('');
+    setConfirmation({ ...actionContext, location: null, locationCheck: null, locationError: '' });
+    checkConfirmationLocation(actionContext);
+  }
+
+  function closeActionConfirmation() {
+    if (busy || locationChecking) return;
+    actionLockRef.current = false;
+    setConfirmation(null);
+  }
+
+  async function recordAttendance(actionContext, location) {
+    const { action, selectedActivity } = actionContext;
     try {
-      const location = await requestLocation();
       if (attendance.anti_mock_location_enabled) {
         if (location.isMocked) {
           const warning = 'Presensi diblokir: perangkat/browser menandai koordinat ini sebagai lokasi mock.';
@@ -397,18 +663,9 @@ export default function Presensi() {
           throw new Error(warning);
         }
       }
-      const requiredActivity = action === 'request_status' ? selectedActivity : action;
-      const requiredLocations = selectedActivity === 'dinas'
-        ? []
-        : (attendance.locations || []).filter((candidate) => candidate.allowed_activities.includes(requiredActivity));
-      const matchingLocation = requiredLocations.find((candidate) => distanceInMeters(
-        location.latitude,
-        location.longitude,
-        candidate.latitude,
-        candidate.longitude
-      ) <= candidate.radius_meters);
-      if (requiredLocations.length && !matchingLocation) {
-        throw new Error(`Aktivitas ini wajib dilakukan di dalam radius: ${requiredLocations.map((candidate) => `${candidate.name} (${candidate.radius_meters} m)`).join(', ')}.`);
+      const locationCheck = inspectAttendanceLocation(location, attendance, action, selectedActivity);
+      if (!locationCheck.allowed) {
+        throw new Error(locationCheck.status);
       }
       const payload = {
         worker_id: workerId,
@@ -424,7 +681,7 @@ export default function Presensi() {
       };
       let requestOptions;
       if (selectedActivity === 'dinas' && action === 'check_in') {
-        if (!evidenceFile) throw new Error('Pilih foto bukti Dinas sebelum Check-In.');
+        if (!evidenceFile) throw new Error('Pilih foto bukti Dinas sebelum Clock In.');
         const compressedEvidence = await compressEvidenceImage(evidenceFile);
         const formData = new FormData();
         Object.entries(payload).forEach(([key, value]) => formData.append(key, String(value)));
@@ -451,12 +708,61 @@ export default function Presensi() {
       } else if (action === 'request_status') {
         setNotice(`Pengajuan ${statusText(selectedActivity, false)} berhasil dikirim dan menunggu persetujuan HR.`);
       } else {
-        setNotice(action === 'check_in' ? 'Check-in berhasil dicatat.' : 'Check-out berhasil dicatat.');
+        setNotice(action === 'check_in' ? 'Clock In berhasil dicatat.' : 'Clock Out berhasil dicatat.');
       }
+      return true;
     } catch (requestError) {
       setError(requestError.message);
+      return false;
+    }
+  }
+
+  async function confirmAttendanceAction() {
+    if (confirmationSubmitLockRef.current
+      || !confirmation
+      || busy
+      || locationChecking
+      || !confirmation.locationCheck?.allowed
+      || !confirmation.location) return;
+    confirmationSubmitLockRef.current = true;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    setLocationWarning('');
+    let closeConfirmation = false;
+    try {
+      const latestLocation = await requestLocation();
+      const latestLocationCheck = inspectAttendanceLocation(
+        latestLocation,
+        attendance,
+        confirmation.action,
+        confirmation.selectedActivity
+      );
+      if (!latestLocationCheck.allowed) {
+        setConfirmation((current) => current && ({
+          ...current,
+          location: latestLocation,
+          locationCheck: latestLocationCheck,
+          locationError: '',
+        }));
+        return;
+      }
+      closeConfirmation = true;
+      await recordAttendance(confirmation, latestLocation);
+    } catch (locationError) {
+      setConfirmation((current) => current && ({
+        ...current,
+        location: null,
+        locationCheck: null,
+        locationError: locationError.message,
+      }));
     } finally {
       setBusy(false);
+      confirmationSubmitLockRef.current = false;
+      if (closeConfirmation) {
+        actionLockRef.current = false;
+        setConfirmation(null);
+      }
     }
   }
 
@@ -520,7 +826,7 @@ export default function Presensi() {
                   attendance={attendance}
                   action={action}
                   busy={busy}
-                  onAction={recordAttendance}
+                  onAction={openActionConfirmation}
                   currentTime={currentTime}
                   error={error}
                   notice={notice}
@@ -532,15 +838,98 @@ export default function Presensi() {
                   }}
                   evidenceFile={evidenceFile}
                   onEvidenceChange={setEvidenceFile}
+                  confirmation={confirmation}
+                  locationChecking={locationChecking}
+                  onConfirm={confirmAttendanceAction}
+                  onCancel={closeActionConfirmation}
+                  onRetryLocation={() => checkConfirmationLocation(confirmation)}
                 />
               )}
               {section === 'history' && <HistoryPanel records={attendance.recent_attendance || []} />}
               {section === 'request' && (
-                <section className="attendance-content-card attendance-info-panel">
-                  <span className="attendance-info-icon"><NavigationIcon name="request" /></span>
-                  <p className="eyebrow">PENGAJUAN</p>
-                  <h2>Hubungi tim HR</h2>
-                  <p>Pengajuan izin atau cuti belum tersedia di halaman ini. Silakan sampaikan permohonan kepada tim HR perusahaan.</p>
+                <section className="attendance-content-card attendance-leave-panel">
+                  <div className="attendance-section-heading">
+                    <div><p className="eyebrow">PERMOHONAN PEKERJA</p><h2>Pengajuan Izin, Cuti, Sakit, atau Off</h2></div>
+                  </div>
+                  <form className="attendance-leave-form" onSubmit={submitLeaveRequest}>
+                    <label className="attendance-form-field">Jenis pengajuan
+                      <select
+                        value={leaveForm.type}
+                        onChange={(event) => setLeaveForm((current) => ({ ...current, type: event.target.value }))}
+                        disabled={leaveSubmitting}
+                        required
+                      >
+                        <option value="izin">Izin</option>
+                        <option value="cuti">Cuti</option>
+                        <option value="sakit">Sakit</option>
+                        <option value="off">Off</option>
+                      </select>
+                    </label>
+                    <div className="attendance-leave-date-grid">
+                      <label className="attendance-form-field">Tanggal mulai
+                        <input
+                          type="date"
+                          value={leaveForm.start_date}
+                          onChange={(event) => setLeaveForm((current) => ({ ...current, start_date: event.target.value }))}
+                          disabled={leaveSubmitting}
+                          required
+                        />
+                      </label>
+                      <label className="attendance-form-field">Tanggal selesai
+                        <input
+                          type="date"
+                          min={leaveForm.start_date || undefined}
+                          value={leaveForm.end_date}
+                          onChange={(event) => setLeaveForm((current) => ({ ...current, end_date: event.target.value }))}
+                          disabled={leaveSubmitting}
+                          required
+                        />
+                      </label>
+                    </div>
+                    <label className="attendance-form-field">Keterangan / alasan
+                      <textarea
+                        value={leaveForm.reason}
+                        onChange={(event) => setLeaveForm((current) => ({ ...current, reason: event.target.value }))}
+                        placeholder="Jelaskan keperluan pengajuan (minimal 5 karakter)"
+                        maxLength={1000}
+                        rows={3}
+                        disabled={leaveSubmitting}
+                        required
+                      />
+                      <small>{leaveForm.reason.length}/1000 karakter</small>
+                    </label>
+                    {leaveError && <p className="attendance-feedback error" role="alert">{leaveError}</p>}
+                    {leaveNotice && <p className="attendance-feedback success" role="status">{leaveNotice}</p>}
+                    <button className="button primary attendance-leave-submit" type="submit" disabled={leaveSubmitting}>
+                      {leaveSubmitting
+                        ? <><span className="attendance-spinner" aria-hidden="true" /> Mengirim pengajuan...</>
+                        : 'Kirim pengajuan'}
+                    </button>
+                  </form>
+
+                  <div className="attendance-leave-history">
+                    <div className="attendance-section-heading">
+                      <div><p className="eyebrow">STATUS PERMOHONAN</p><h3>Riwayat pengajuan</h3></div>
+                      <span className="count-pill">{leaveRequests.length} pengajuan</span>
+                    </div>
+                    {leaveRequestsLoading ? <p className="attendance-muted">Memuat riwayat pengajuan...</p>
+                      : leaveRequests.length ? (
+                        <div className="attendance-leave-list">
+                          {leaveRequests.map((request) => (
+                            <article className="attendance-leave-item" key={request.id}>
+                              <div className="attendance-leave-item-heading">
+                                <strong>{leaveTypeLabel(request.type)}</strong>
+                                <span className={`attendance-leave-status status-${request.status}`}>{leaveStatusLabel(request.status)}</span>
+                              </div>
+                              <span className="attendance-leave-dates">
+                                {formatLeaveDate(request.start_date)} – {formatLeaveDate(request.end_date)}
+                              </span>
+                              <p>{request.reason}</p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : <p className="attendance-leave-empty">Belum ada riwayat pengajuan. Kirim formulir di atas untuk memulai.</p>}
+                  </div>
                 </section>
               )}
               {section === 'auto' && (
@@ -548,7 +937,7 @@ export default function Presensi() {
                   <span className="attendance-auto-state"><NavigationIcon name="auto" /> NONAKTIF</span>
                   <p className="eyebrow">PRESENSI OTOMATIS</p>
                   <h2>Kontrol tetap di tanganmu</h2>
-                  <p>Check-in dan check-out tidak dijalankan otomatis. Tekan tombol Timer agar waktu dan lokasi tercatat saat kamu hadir.</p>
+                  <p>Clock In dan Clock Out tidak dijalankan otomatis. Tekan tombol Timer agar waktu dan lokasi tercatat saat kamu hadir.</p>
                 </section>
               )}
               {section === 'account' && (
@@ -570,10 +959,10 @@ export default function Presensi() {
                   type="button"
                   key={item.id}
                   aria-current={section === item.id ? 'page' : undefined}
-                  disabled={item.primary && busy}
+                  disabled={item.primary && (busy || Boolean(confirmation))}
                   onClick={() => {
                     if (item.primary && section === 'timer' && action) {
-                      recordAttendance();
+                      openActionConfirmation();
                       return;
                     }
                     setSection(item.id);
@@ -588,7 +977,7 @@ export default function Presensi() {
             </nav>
           </>
         )}
-        <footer className="attendance-client-footer">Lokasi hanya diminta saat mencatat check-in atau check-out.</footer>
+        <footer className="attendance-client-footer">Lokasi hanya diminta saat mencatat Clock In atau Clock Out.</footer>
       </div>
     </main>
   );
