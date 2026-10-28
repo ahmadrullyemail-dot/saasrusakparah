@@ -1,7 +1,7 @@
 import { attendanceMonthLabel, attendanceMonthSummary, attendanceStatusLabel, formatAttendanceTime, formatCoordinate, monthlyAttendanceCode } from '../lib/hrd.js';
 import { Icon } from './Icon.jsx';
 
-export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLinks, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, createAttendanceLink, copyAttendanceLink, decideAttendanceRequest, decideLeaveRequest, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance, revokeAttendanceLink }) {
+export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLinks, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, createAttendanceLink, copyAttendanceLink, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance, revokeAttendanceLink }) {
   return (
 <section
           className="panel attendance-panel"
@@ -98,10 +98,20 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
                             <span className="attendance-type-badge">{({ izin: 'Izin', cuti: 'Cuti', sakit: 'Sakit', off: 'Off' })[request.type]}</span>
                             <span>{request.start_date} – {request.end_date}</span>
                             <span className="leave-approval-reason">{request.reason}</span>
+                            {request.has_attachment && (
+                              <a
+                                className="leave-attachment-link"
+                                href={`/api/leaves/${encodeURIComponent(request.id)}/attachment`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Lihat lampiran: {request.attachment_original_name}
+                              </a>
+                            )}
                           </div>
                           <div className="leave-approval-actions">
                             <button className="button primary" type="button" disabled={busy} onClick={() => decideLeaveRequest(request.id, 'approved')}>Setujui</button>
-                            <button className="button danger" type="button" disabled={busy} onClick={() => decideLeaveRequest(request.id, 'rejected')}>Tolak</button>
+                            <button className="button danger" type="button" disabled={busy} onClick={() => openLeaveRejection(request)}>Tolak</button>
                           </div>
                         </article>
                       ))}

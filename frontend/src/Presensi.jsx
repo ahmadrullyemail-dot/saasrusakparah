@@ -179,7 +179,7 @@ async function publicLeaveRequest(path, options = {}) {
     ...options,
     cache: 'no-store',
     headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
     },
   });
@@ -516,6 +516,7 @@ export default function Presensi() {
   const [leaveError, setLeaveError] = useState('');
   const [leaveNotice, setLeaveNotice] = useState('');
   const [leaveForm, setLeaveForm] = useState({ type: 'izin', start_date: '', end_date: '', reason: '' });
+  const [leaveAttachment, setLeaveAttachment] = useState(null);
   const actionLockRef = useRef(false);
   const confirmationSubmitLockRef = useRef(false);
   const leaveSubmitLockRef = useRef(false);
@@ -559,21 +560,30 @@ export default function Presensi() {
       setLeaveError('Isi rentang tanggal yang valid dan alasan minimal 5 karakter.');
       return;
     }
+    if (leaveAttachment && (!['image/jpeg', 'image/png'].includes(leaveAttachment.type)
+      || leaveAttachment.size > 5 * 1024 * 1024)) {
+      setLeaveError('Lampiran harus berupa gambar JPG/PNG dengan ukuran maksimal 5 MB.');
+      return;
+    }
     leaveSubmitLockRef.current = true;
     setLeaveSubmitting(true);
     setLeaveError('');
     setLeaveNotice('');
     try {
+      const formData = new FormData();
+      Object.entries({
+        worker_id: workerId,
+        token,
+        ...leaveForm,
+        reason: leaveForm.reason.trim(),
+      }).forEach(([key, value]) => formData.append(key, value));
+      if (leaveAttachment) formData.append('attachment', leaveAttachment);
       await publicLeaveRequest('', {
         method: 'POST',
-        body: JSON.stringify({
-          worker_id: workerId,
-          token,
-          ...leaveForm,
-          reason: leaveForm.reason.trim(),
-        }),
+        body: formData,
       });
       setLeaveForm({ type: 'izin', start_date: '', end_date: '', reason: '' });
+      setLeaveAttachment(null);
       setLeaveNotice('Pengajuan berhasil dikirim dan sedang menunggu tinjauan HR.');
       try {
         const requests = await publicLeaveRequest(
@@ -898,6 +908,25 @@ export default function Presensi() {
                       />
                       <small>{leaveForm.reason.length}/1000 karakter</small>
                     </label>
+                    <label className="attendance-form-field">Lampiran bukti (opsional, JPG/PNG · maksimal 5 MB)
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0] || null;
+                          setLeaveAttachment(file);
+                          if (file && !['image/jpeg', 'image/png'].includes(file.type)) {
+                            setLeaveError('Lampiran hanya boleh berupa gambar JPG atau PNG.');
+                          } else if (file && file.size > 5 * 1024 * 1024) {
+                            setLeaveError('Ukuran lampiran maksimal 5 MB.');
+                          } else {
+                            setLeaveError('');
+                          }
+                        }}
+                        disabled={leaveSubmitting}
+                      />
+                      <small>{leaveAttachment ? `Dipilih: ${leaveAttachment.name}` : 'Lampirkan foto surat dokter atau bukti izin.'}</small>
+                    </label>
                     {leaveError && <p className="attendance-feedback error" role="alert">{leaveError}</p>}
                     {leaveNotice && <p className="attendance-feedback success" role="status">{leaveNotice}</p>}
                     <button className="button primary attendance-leave-submit" type="submit" disabled={leaveSubmitting}>
@@ -925,6 +954,12 @@ export default function Presensi() {
                                 {formatLeaveDate(request.start_date)} – {formatLeaveDate(request.end_date)}
                               </span>
                               <p>{request.reason}</p>
+                              {request.rejection_note && (
+                                <div className="attendance-leave-rejection-note">
+                                  <strong>Catatan penolakan</strong>
+                                  <span>{request.rejection_note}</span>
+                                </div>
+                              )}
                             </article>
                           ))}
                         </div>

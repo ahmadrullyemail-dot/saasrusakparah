@@ -1,7 +1,9 @@
 require('dotenv').config({ path: require('node:path').resolve(__dirname, '../.env') });
 
 const crypto = require('node:crypto');
+const fs = require('node:fs/promises');
 const http = require('node:http');
+const path = require('node:path');
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -22,6 +24,8 @@ if (!Number.isInteger(TRUST_PROXY_HOPS) || TRUST_PROXY_HOPS < 0 || TRUST_PROXY_H
 app.set('trust proxy', TRUST_PROXY_HOPS);
 const COOKIE_NAME = 'hrd_session';
 const MAX_PROFILE_PHOTO_BYTES = 900 * 1024;
+const MAX_LEAVE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const LEAVE_ATTACHMENT_DIRECTORY = path.resolve(__dirname, '../storage/leave-attachments');
 const PASSWORD_RESET_TOKEN_TTL_MINUTES = 30;
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX = 10;
@@ -51,6 +55,10 @@ const attendanceEvidenceUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_PROFILE_PHOTO_BYTES, files: 1 },
 });
+const leaveAttachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_LEAVE_ATTACHMENT_BYTES, files: 1 },
+});
 const ATTENDANCE_ACTIVITIES = new Set(['check_in', 'check_out', 'off', 'permission', 'leave', 'sick']);
 const EMPLOYEE_REQUEST_TYPES = new Set(['off', 'permission', 'leave', 'sick']);
 const LEAVE_REQUEST_TYPES = new Set(['izin', 'cuti', 'sakit', 'off']);
@@ -69,6 +77,33 @@ function profilePhotoMimeType(file) {
     return 'image/jpeg';
   }
   return null;
+}
+
+function leaveAttachmentMimeType(file) {
+  if (!Buffer.isBuffer(file)) return null;
+  if (file.length >= 8 && file.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png';
+  }
+  if (file.length >= 3 && file[0] === 0xff && file[1] === 0xd8 && file[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  return null;
+}
+
+function safeLeaveAttachmentName(value) {
+  const basename = path.basename(String(value || 'lampiran'))
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^\.+/, '')
+    .slice(0, 255);
+  return basename || 'lampiran';
+}
+
+function leaveAttachmentStoragePath(storageKey) {
+  if (typeof storageKey !== 'string' || !/^leave-attachments\/[0-9a-f-]{36}\.(jpg|png)$/.test(storageKey)) {
+    return null;
+  }
+  const filePath = path.resolve(__dirname, '../storage', storageKey);
+  return filePath.startsWith(`${LEAVE_ATTACHMENT_DIRECTORY}${path.sep}`) ? filePath : null;
 }
 
 function distanceInMeters(latitude1, longitude1, latitude2, longitude2) {
@@ -276,6 +311,7 @@ function validLeaveRequestInput(input) {
     && typeof startDate === 'string' && validDate(startDate)
     && typeof endDate === 'string' && validDate(endDate)
     && startDate <= endDate
+    && leaveRequestDates(startDate, endDate) !== null
     && typeof reason === 'string'
     && reason.trim().length >= 5
     && reason.trim().length <= 1000;
@@ -283,6 +319,41 @@ function validLeaveRequestInput(input) {
 
 function validLeaveRequestStatus(value) {
   return value === 'approved' || value === 'rejected';
+}
+
+function validLeaveRejectionNote(value) {
+  return typeof value === 'string' && value.trim().length >= 5 && value.trim().length <= 1000;
+}
+
+function leaveAttendanceStatus(type) {
+  return { izin: 'permission', cuti: 'leave', sakit: 'sick', off: 'off' }[type] || null;
+}
+
+function leaveRequestDates(startDate, endDate) {
+  const start = new Date(`${String(startDate).slice(0, 10)}T00:00:00Z`);
+  const end = new Date(`${String(endDate).slice(0, 10)}T00:00:00Z`);
+  const dayCount = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+  if (!Number.isInteger(dayCount) || dayCount < 1 || dayCount > 366) return null;
+  return Array.from({ length: dayCount }, (_, index) => {
+    const date = new Date(start.getTime() + index * 86400000);
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+function findLeaveAttendanceConflictDate(requestDates, attendanceRows, intendedStatus) {
+  const attendanceByDate = new Map(
+    attendanceRows.map((row) => [String(row.attendance_date).slice(0, 10), row])
+  );
+  return requestDates.find((date) => {
+    const existing = attendanceByDate.get(date);
+    return existing && (
+      existing.check_in_time
+      || existing.check_out_time
+      || existing.approval_status === 'pending'
+      || existing.status !== intendedStatus
+      || existing.attendance_type !== intendedStatus
+    );
+  }) || null;
 }
 
 function validDocumentWarningThreshold(value) {
@@ -591,7 +662,7 @@ function evaluateEligibility(worker, documents, today = new Date().toISOString()
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-app.post('/api/leaves', asyncRoute(async (req, res) => {
+app.post('/api/leaves', leaveAttachmentUpload.single('attachment'), asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.set('Referrer-Policy', 'no-referrer');
   const { worker_id: workerId, token, type, start_date: startDate, end_date: endDate, reason } = req.body || {};
@@ -603,11 +674,17 @@ app.post('/api/leaves', asyncRoute(async (req, res) => {
       error: 'Provide a valid request type, date range, and reason of 5 to 1000 characters',
     });
   }
+  const attachmentMimeType = req.file ? leaveAttachmentMimeType(req.file.buffer) : null;
+  if (req.file && !attachmentMimeType) {
+    return res.status(400).json({ error: 'Attachment must be a valid JPG or PNG image' });
+  }
   const worker = await findWorkerForAttendanceToken(workerId, token);
   if (!worker) return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
 
   const connection = await pool.getConnection();
   let insertedId;
+  let attachmentPath;
+  let attachmentWritten = false;
   try {
     await connection.beginTransaction();
     const [workerRows] = await connection.execute(
@@ -631,10 +708,28 @@ app.post('/api/leaves', asyncRoute(async (req, res) => {
       await connection.rollback();
       return res.status(409).json({ error: 'A pending or approved request already covers part of these dates' });
     }
+    let attachmentStorageKey = null;
+    let attachmentOriginalName = null;
+    if (req.file) {
+      const attachmentId = crypto.randomUUID();
+      const extension = attachmentMimeType === 'image/png' ? 'png' : 'jpg';
+      attachmentStorageKey = `leave-attachments/${attachmentId}.${extension}`;
+      attachmentPath = leaveAttachmentStoragePath(attachmentStorageKey);
+      if (!attachmentPath) throw new Error('Unable to create a safe leave attachment path');
+      await fs.mkdir(LEAVE_ATTACHMENT_DIRECTORY, { recursive: true, mode: 0o700 });
+      await fs.writeFile(attachmentPath, req.file.buffer, { flag: 'wx', mode: 0o600 });
+      attachmentWritten = true;
+      attachmentOriginalName = safeLeaveAttachmentName(req.file.originalname);
+    }
     const [result] = await connection.execute(
-      `INSERT INTO leave_requests (tenant_id, worker_id, \`type\`, start_date, end_date, reason)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [worker.tenant_id, worker.worker_id, type, startDate, endDate, reason.trim()]
+      `INSERT INTO leave_requests
+         (tenant_id, worker_id, \`type\`, start_date, end_date, reason,
+          attachment_storage_key, attachment_original_name, attachment_mime_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        worker.tenant_id, worker.worker_id, type, startDate, endDate, reason.trim(),
+        attachmentStorageKey, attachmentOriginalName, attachmentMimeType,
+      ]
     );
     insertedId = String(result.insertId);
     await connection.execute(
@@ -651,6 +746,9 @@ app.post('/api/leaves', asyncRoute(async (req, res) => {
     await connection.commit();
   } catch (error) {
     await connection.rollback();
+    if (attachmentWritten) await fs.unlink(attachmentPath).catch((cleanupError) => {
+      if (cleanupError.code !== 'ENOENT') console.error('Unable to remove uncommitted leave attachment', cleanupError);
+    });
     throw error;
   } finally {
     connection.release();
@@ -667,6 +765,7 @@ app.post('/api/leaves', asyncRoute(async (req, res) => {
       end_date: endDate,
       reason: reason.trim(),
       status: 'pending',
+      attachment_name: req.file ? safeLeaveAttachmentName(req.file.originalname) : null,
     },
   });
 }));
@@ -681,7 +780,7 @@ app.get('/api/leaves', asyncRoute(async (req, res) => {
     `SELECT id, worker_id, \`type\`,
             DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
             DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
-            reason, status, created_at, reviewed_at
+            reason, status, rejection_note, created_at, reviewed_at
        FROM leave_requests
       WHERE tenant_id = ? AND worker_id = ?
       ORDER BY created_at DESC, id DESC
@@ -1362,7 +1461,9 @@ app.get('/api/leaves/pending', requireManager, asyncRoute(async (req, res) => {
     `SELECT lr.id, lr.worker_id, w.full_name, w.position, lr.\`type\`,
             DATE_FORMAT(lr.start_date, '%Y-%m-%d') AS start_date,
             DATE_FORMAT(lr.end_date, '%Y-%m-%d') AS end_date,
-            lr.reason, lr.status, lr.created_at
+            lr.reason, lr.status, lr.created_at,
+            lr.attachment_original_name IS NOT NULL AS has_attachment,
+            lr.attachment_original_name
        FROM leave_requests lr
        JOIN workers w ON w.id = lr.worker_id AND w.tenant_id = lr.tenant_id
       WHERE lr.tenant_id = ? AND lr.status = 'pending' AND w.deleted_at IS NULL
@@ -1375,11 +1476,46 @@ app.get('/api/leaves/pending', requireManager, asyncRoute(async (req, res) => {
   });
 }));
 
+app.get('/api/leaves/:id/attachment', requireManager, asyncRoute(async (req, res) => {
+  if (!validWorkerId(req.params.id)) return res.status(400).json({ error: 'Invalid leave request ID' });
+  const [rows] = await pool.execute(
+    `SELECT attachment_storage_key, attachment_original_name, attachment_mime_type
+       FROM leave_requests
+      WHERE id = ? AND tenant_id = ?`,
+    [req.params.id, req.auth.tenantId]
+  );
+  const attachment = rows[0];
+  if (!attachment || !attachment.attachment_storage_key) {
+    return res.status(404).json({ error: 'Attachment not found' });
+  }
+  const filePath = leaveAttachmentStoragePath(attachment.attachment_storage_key);
+  if (!filePath) {
+    console.error(`Invalid leave attachment storage key for request ${req.params.id}`);
+    return res.status(500).json({ error: 'Attachment is unavailable' });
+  }
+  try {
+    await fs.access(filePath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return res.status(404).json({ error: 'Attachment not found' });
+    throw error;
+  }
+  res.set({
+    'Cache-Control': 'private, no-store',
+    'Content-Disposition': `attachment; filename="${attachment.attachment_original_name.replace(/["\\\r\n]/g, '_')}"`,
+    'Content-Type': attachment.attachment_mime_type,
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.sendFile(filePath);
+}));
+
 app.put('/api/leaves/:id/status', requireManager, asyncRoute(async (req, res) => {
   const requestId = req.params.id;
-  const { status } = req.body || {};
+  const { status, rejection_note: rejectionNote } = req.body || {};
   if (!validWorkerId(requestId) || !validLeaveRequestStatus(status)) {
     return res.status(400).json({ error: 'Provide a valid request ID and status (approved or rejected)' });
+  }
+  if (status === 'rejected' && !validLeaveRejectionNote(rejectionNote)) {
+    return res.status(400).json({ error: 'A rejection note of 5 to 1000 characters is required' });
   }
   const connection = await pool.getConnection();
   let updatedRequest;
@@ -1402,11 +1538,64 @@ app.put('/api/leaves/:id/status', requireManager, asyncRoute(async (req, res) =>
       await connection.rollback();
       return res.status(409).json({ error: 'Leave request has already been reviewed' });
     }
+    if (status === 'approved') {
+      const requestDates = leaveRequestDates(request.start_date, request.end_date);
+      if (!requestDates) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'The requested date range is invalid or too long to approve' });
+      }
+      const placeholders = requestDates.map(() => '?').join(', ');
+      const [attendanceRows] = await connection.execute(
+        `SELECT attendance_date, check_in_time, check_out_time, status, attendance_type, approval_status
+           FROM attendance
+          WHERE tenant_id = ? AND worker_id = ? AND deleted_at IS NULL
+            AND attendance_date IN (${placeholders})
+          FOR UPDATE`,
+        [req.auth.tenantId, request.worker_id, ...requestDates]
+      );
+      const intendedAttendanceStatus = leaveAttendanceStatus(request.type);
+      const attendanceByDate = new Map(
+        attendanceRows.map((row) => [String(row.attendance_date).slice(0, 10), row])
+      );
+      const conflictDate = findLeaveAttendanceConflictDate(
+        requestDates,
+        attendanceRows,
+        intendedAttendanceStatus
+      );
+      if (conflictDate) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: `Approval cannot replace existing attendance records. Resolve the attendance conflict for ${conflictDate} first.`,
+          conflict_date: conflictDate,
+        });
+      }
+      for (const attendanceDate of requestDates) {
+        if (attendanceByDate.has(attendanceDate)) {
+          await connection.execute(
+            `UPDATE attendance
+                SET status = ?, attendance_type = ?, approval_status = 'approved',
+                    approved_by = ?, approval_updated_at = CURRENT_TIMESTAMP
+              WHERE tenant_id = ? AND worker_id = ? AND attendance_date = ? AND deleted_at IS NULL`,
+            [intendedAttendanceStatus, intendedAttendanceStatus, req.auth.userId,
+              req.auth.tenantId, request.worker_id, attendanceDate]
+          );
+        } else {
+          await connection.execute(
+            `INSERT INTO attendance
+               (tenant_id, worker_id, attendance_date, status, attendance_type,
+                approval_status, approved_by, approval_updated_at)
+             VALUES (?, ?, ?, ?, ?, 'approved', ?, CURRENT_TIMESTAMP)`,
+            [req.auth.tenantId, request.worker_id, attendanceDate,
+              intendedAttendanceStatus, intendedAttendanceStatus, req.auth.userId]
+          );
+        }
+      }
+    }
     await connection.execute(
       `UPDATE leave_requests
-          SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
+          SET status = ?, rejection_note = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
         WHERE id = ? AND tenant_id = ? AND status = 'pending'`,
-      [status, req.auth.userId, requestId, req.auth.tenantId]
+      [status, status === 'rejected' ? rejectionNote.trim() : null, req.auth.userId, requestId, req.auth.tenantId]
     );
     await recordAudit(req, {
       action: status === 'approved' ? 'approve' : 'reject',
@@ -1425,6 +1614,9 @@ app.put('/api/leaves/:id/status', requireManager, asyncRoute(async (req, res) =>
     throw error;
   } finally {
     connection.release();
+  }
+  if (status === 'approved') {
+    publishTenantEvent(req.auth.tenantId, 'attendance_updated', { action: 'leave_approved' });
   }
   res.json({ data: updatedRequest });
 }));
@@ -2953,7 +3145,10 @@ app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ error: 'Image must be 900 KB or smaller after compression' });
+      const maxSizeMessage = req.originalUrl.startsWith('/api/leaves')
+        ? 'Leave attachment must be 5 MB or smaller'
+        : 'Image must be 900 KB or smaller after compression';
+      return res.status(413).json({ error: maxSizeMessage });
     }
     return res.status(400).json({ error: 'Upload one JPG or PNG image at a time' });
   }
@@ -3111,6 +3306,13 @@ module.exports = {
   validDate,
   validLeaveRequestInput,
   validLeaveRequestStatus,
+  validLeaveRejectionNote,
+  leaveAttendanceStatus,
+  leaveRequestDates,
+  findLeaveAttendanceConflictDate,
+  leaveAttachmentMimeType,
+  safeLeaveAttachmentName,
+  leaveAttachmentStoragePath,
   validDocumentWarningThreshold,
   attendanceMonthRange,
   validRequiredDocuments,

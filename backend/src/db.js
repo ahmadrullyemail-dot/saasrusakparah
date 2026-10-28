@@ -220,6 +220,10 @@ async function initializeDatabase() {
       end_date DATE NOT NULL,
       reason VARCHAR(1000) NOT NULL,
       status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+      rejection_note VARCHAR(1000) NULL,
+      attachment_storage_key VARCHAR(100) NULL,
+      attachment_original_name VARCHAR(255) NULL,
+      attachment_mime_type VARCHAR(32) NULL,
       reviewed_by BIGINT UNSIGNED NULL,
       reviewed_at DATETIME NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -261,6 +265,24 @@ async function initializeDatabase() {
 
   for (const statement of statements) {
     await pool.query(statement);
+  }
+
+  const [leaveRequestColumns] = await pool.execute(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'leave_requests'`,
+    [databaseName]
+  );
+  const existingLeaveRequestColumns = new Set(leaveRequestColumns.map(({ COLUMN_NAME }) => COLUMN_NAME));
+  const leaveRequestMigrations = [
+    ['rejection_note', 'VARCHAR(1000) NULL'],
+    ['attachment_storage_key', 'VARCHAR(100) NULL'],
+    ['attachment_original_name', 'VARCHAR(255) NULL'],
+    ['attachment_mime_type', 'VARCHAR(32) NULL'],
+  ];
+  for (const [columnName, columnDefinition] of leaveRequestMigrations) {
+    if (!existingLeaveRequestColumns.has(columnName)) {
+      await pool.query(`ALTER TABLE leave_requests ADD COLUMN \`${columnName}\` ${columnDefinition}`);
+    }
   }
 
   const [attendanceSettingColumns] = await pool.execute(

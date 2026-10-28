@@ -5,6 +5,13 @@ const {
   validDate,
   validLeaveRequestInput,
   validLeaveRequestStatus,
+  validLeaveRejectionNote,
+  leaveAttendanceStatus,
+  leaveRequestDates,
+  findLeaveAttendanceConflictDate,
+  leaveAttachmentMimeType,
+  safeLeaveAttachmentName,
+  leaveAttachmentStoragePath,
   validDocumentWarningThreshold,
   attendanceMonthRange,
   validRequiredDocuments,
@@ -159,6 +166,38 @@ test('leave requests require a supported type, real ordered dates, and a concise
   assert.equal(validLeaveRequestStatus('approved'), true);
   assert.equal(validLeaveRequestStatus('rejected'), true);
   assert.equal(validLeaveRequestStatus('pending'), false);
+  assert.equal(validLeaveRejectionNote('Alasan cukup'), true);
+  assert.equal(validLeaveRejectionNote('abc'), false);
+  assert.equal(validLeaveRejectionNote('  '), false);
+  assert.equal(validLeaveRejectionNote('x'.repeat(1001)), false);
+  assert.deepEqual(leaveRequestDates('2026-10-29', '2026-10-31'), ['2026-10-29', '2026-10-30', '2026-10-31']);
+  assert.equal(leaveRequestDates('2026-01-01', '2027-01-02'), null);
+  assert.equal(leaveAttendanceStatus('izin'), 'permission');
+  assert.equal(leaveAttendanceStatus('cuti'), 'leave');
+  assert.equal(leaveAttendanceStatus('sakit'), 'sick');
+  assert.equal(leaveAttendanceStatus('off'), 'off');
+  const approvalDays = ['2026-10-29', '2026-10-30'];
+  assert.equal(findLeaveAttendanceConflictDate(approvalDays, [], 'leave'), null);
+  assert.equal(findLeaveAttendanceConflictDate(approvalDays, [
+    {
+      attendance_date: '2026-10-30',
+      status: 'leave',
+      attendance_type: 'leave',
+      approval_status: 'approved',
+      check_in_time: null,
+      check_out_time: null,
+    },
+  ], 'leave'), null);
+  assert.equal(findLeaveAttendanceConflictDate(approvalDays, [
+    {
+      attendance_date: '2026-10-30',
+      status: 'present',
+      attendance_type: 'regular',
+      approval_status: 'not_required',
+      check_in_time: '2026-10-30 09:00:00',
+      check_out_time: null,
+    },
+  ], 'leave'), '2026-10-30');
 });
 
 test('document dates are normalized by selected status', () => {
@@ -281,6 +320,17 @@ test('profile photo uploads are recognized only from JPEG and PNG signatures', (
   assert.equal(profilePhotoMimeType(jpeg), 'image/jpeg');
   assert.equal(profilePhotoMimeType(Buffer.from('not an image')), null);
   assert.equal(profilePhotoMimeType(null), null);
+});
+
+test('leave attachment uploads are signature-checked and stored under private random keys', () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
+  assert.equal(leaveAttachmentMimeType(png), 'image/png');
+  assert.equal(leaveAttachmentMimeType(jpeg), 'image/jpeg');
+  assert.equal(leaveAttachmentMimeType(Buffer.from('not an image')), null);
+  assert.equal(safeLeaveAttachmentName('../../surat izin!!.png'), 'surat_izin_.png');
+  assert.match(leaveAttachmentStoragePath('leave-attachments/123e4567-e89b-12d3-a456-426614174000.jpg'), /storage[\\/]leave-attachments[\\/]123e4567-e89b-12d3-a456-426614174000\.jpg$/);
+  assert.equal(leaveAttachmentStoragePath('leave-attachments/../../app.js'), null);
 });
 
 test('profile photo storage stays below legacy MariaDB packet limits', () => {

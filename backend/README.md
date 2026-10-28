@@ -40,8 +40,9 @@ API berjalan di port 4000 secara default. Vite meneruskan `/api` dan `/socket.io
 - `PATCH /api/profile`, `POST /api/profile/photo`, `GET /api/profile/photo`, `PATCH /api/profile/password`
 - `GET /api/admin/users`, `POST /api/admin/users`, `PATCH /api/admin/users/:id`, `POST /api/admin/users/:id/reset-password` (Admin-only)
 - `GET /api/dashboard` — metrik status pekerja, dokumen yang perlu ditindaklanjuti, klaim presensi pending, dan pengajuan izin/cuti/sakit/off pending untuk tenant aktif
-- `POST /api/leaves`, `GET /api/leaves?worker_id=...&token=...` — pengajuan rentang izin/cuti/sakit/off dan riwayat pekerja; link presensi HMAC aktif diperlukan untuk portal pekerja
-- `GET /api/leaves/pending`, `PUT /api/leaves/:id/status` — antrean dan keputusan pengajuan tenant-scoped untuk Admin/HR Staff
+- `POST /api/leaves`, `GET /api/leaves?worker_id=...&token=...` — pengajuan rentang izin/cuti/sakit/off dan riwayat pekerja; link presensi HMAC aktif diperlukan untuk portal pekerja. Pengajuan menerima satu lampiran JPG/PNG opsional sampai 5 MB.
+- `GET /api/leaves/pending`, `PUT /api/leaves/:id/status` — antrean dan keputusan pengajuan tenant-scoped untuk Admin/HR Staff; penolakan wajib menyertakan `rejection_note` (5–1000 karakter).
+- `GET /api/leaves/:id/attachment` — akses lampiran terproteksi tenant-scoped untuk Admin/HR Staff saja; file disimpan di storage privat, tidak disajikan sebagai static.
 - `GET /api/admin/document-settings`, `PATCH /api/admin/document-settings` — baca/simpan default ambang pemantauan masa berlaku dokumen per tenant (1–365 hari; default 30; Admin-only); nilai ini menjadi fallback jenis dokumen.
 - `GET /api/admin/attendance-settings`, `POST /api/admin/attendance-settings/salt` — cek status/generate/rotasi salt perusahaan (Admin-only).
 - `PATCH /api/admin/attendance-settings` — mengaktifkan atau menonaktifkan Anti-Mock Location untuk tenant (Admin-only).
@@ -52,7 +53,7 @@ API berjalan di port 4000 secara default. Vite meneruskan `/api` dan `/socket.io
 - `GET /api/attendance/:workerId/evidence?date=YYYY-MM-DD` — foto bukti presensi untuk role terautentikasi tenant.
 - `POST /api/workers/:id/attendance-link` — buat/ambil tautan (Admin/HR Staff); `DELETE /api/workers/:id/attendance-link` — cabut tautan (Admin-only).
 - `GET /api/public/attendance?worker_id=...&token=...`, `POST /api/public/attendance` — halaman publik memvalidasi link HMAC, aturan lokasi/radius, pengajuan status presensi, dan clock in/out.
-- Tabel `leave_requests` dibuat otomatis saat startup. Permohonan tidak boleh tumpang-tindih dengan permohonan pending atau approved lain milik pekerja; keputusan HR dicatat pada audit log.
+- Tabel `leave_requests` dibuat otomatis saat startup dan kolom lampiran/catatan penolakan dimigrasikan untuk database lama. Permohonan tidak boleh tumpang-tindih dengan permohonan pending atau approved lain milik pekerja; keputusan HR dicatat pada audit log. Persetujuan menulis status harian ke matriks presensi dalam transaksi yang sama; jika tanggal sudah memiliki clock log atau status berbeda, persetujuan ditolak dengan konflik dan log aktual dipertahankan.
 - `GET /api/workers`, `POST /api/workers`, `GET /api/workers/:id`
 - `PATCH /api/workers/:id` — ubah data pekerja dan persyaratan dokumen, Admin-only.
 - `POST /api/admin/workers/import` — terima hingga 500 baris pekerja sebagai JSON, Admin-only; file Excel diproses client-side dan tidak disimpan di server.

@@ -48,6 +48,8 @@ function WorkspaceApp() {
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [pendingLeaveRequests, setPendingLeaveRequests] = useState([]);
   const [pendingLeaveRequestsLoading, setPendingLeaveRequestsLoading] = useState(false);
+  const [leaveRejectionRequest, setLeaveRejectionRequest] = useState(null);
+  const [leaveRejectionNote, setLeaveRejectionNote] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -448,17 +450,38 @@ function WorkspaceApp() {
     }
   }
 
-  async function decideLeaveRequest(requestId, status) {
+  function openLeaveRejection(request) {
+    setError('');
+    setLeaveRejectionNote('');
+    setLeaveRejectionRequest(request);
+  }
+
+  async function decideLeaveRequest(requestId, status, rejectionNote = '') {
+    if (status === 'rejected' && rejectionNote.trim().length < 5) {
+      setError('Catatan penolakan wajib diisi minimal 5 karakter.');
+      return false;
+    }
     setError('');
     setNotice('');
     setBusy(true);
     try {
       await api(`/leaves/${encodeURIComponent(requestId)}/status`, {
         method: 'PUT',
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          ...(status === 'rejected' ? { rejection_note: rejectionNote.trim() } : {}),
+        }),
       });
-      await Promise.all([refreshPendingLeaveRequests(), refreshDashboard()]);
+      const refreshTasks = [refreshPendingLeaveRequests(), refreshDashboard()];
+      if (status === 'approved') {
+        refreshTasks.push(
+          api(`/attendance?date=${encodeURIComponent(attendanceDate)}`).then(setAttendanceData),
+          api(`/attendance/month?month=${encodeURIComponent(attendanceMonth)}`).then(setMonthlyAttendance)
+        );
+      }
+      await Promise.all(refreshTasks);
       setNotice(status === 'approved' ? 'Pengajuan berhasil disetujui.' : 'Pengajuan berhasil ditolak.');
+      if (status === 'rejected') setLeaveRejectionRequest(null);
       return true;
     } catch (requestError) {
       showError(requestError);
@@ -1296,6 +1319,60 @@ function WorkspaceApp() {
             initialWorker={editingWorker}
           />
         )}
+        {leaveRejectionRequest && (
+          <div className="leave-review-backdrop">
+            <form
+              className="leave-review-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="leave-review-title"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                await decideLeaveRequest(leaveRejectionRequest.id, 'rejected', leaveRejectionNote);
+              }}
+            >
+              <div>
+                <p className="eyebrow">CATATAN WAJIB</p>
+                <h2 id="leave-review-title">Tolak pengajuan</h2>
+                <p className="muted">
+                  Pengajuan {leaveRejectionRequest.full_name} · {leaveRejectionRequest.start_date} – {leaveRejectionRequest.end_date}
+                </p>
+              </div>
+              <label className="leave-review-note">
+                Alasan penolakan
+                <textarea
+                  autoFocus
+                  value={leaveRejectionNote}
+                  onChange={(event) => setLeaveRejectionNote(event.target.value)}
+                  minLength={5}
+                  maxLength={1000}
+                  rows={4}
+                  required
+                  disabled={busy}
+                  placeholder="Jelaskan alasan pengajuan ditolak (minimal 5 karakter)"
+                />
+                <small>{leaveRejectionNote.trim().length}/1000 karakter</small>
+              </label>
+              {error && <p className="attendance-feedback error" role="alert">{error}</p>}
+              <div className="leave-review-actions">
+                <button
+                  className="button secondary"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setLeaveRejectionRequest(null);
+                    setError('');
+                  }}
+                >
+                  Batal
+                </button>
+                <button className="button danger" type="submit" disabled={busy || leaveRejectionNote.trim().length < 5}>
+                  {busy ? 'Menyimpan…' : 'Tolak pengajuan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
 
         <section
           className="overview-dashboard"
@@ -1410,10 +1487,20 @@ function WorkspaceApp() {
                         <strong className="uppercase-text">{request.full_name}</strong>
                         <span>{({ izin: 'Izin', cuti: 'Cuti', sakit: 'Sakit', off: 'Off' })[request.type]} · {request.start_date} – {request.end_date}</span>
                         <small>{request.reason}</small>
+                        {request.has_attachment && (
+                          <a
+                            className="leave-attachment-link"
+                            href={`/api/leaves/${encodeURIComponent(request.id)}/attachment`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Lihat lampiran: {request.attachment_original_name}
+                          </a>
+                        )}
                       </div>
                       <div className="dashboard-leave-actions">
                         <button className="button primary" type="button" disabled={busy} onClick={() => decideLeaveRequest(request.id, 'approved')}>Setujui</button>
-                        <button className="button danger" type="button" disabled={busy} onClick={() => decideLeaveRequest(request.id, 'rejected')}>Tolak</button>
+                        <button className="button danger" type="button" disabled={busy} onClick={() => openLeaveRejection(request)}>Tolak</button>
                       </div>
                     </article>
                   )) : <p className="dashboard-leave-empty">Tidak ada pengajuan pekerja yang menunggu keputusan.</p>}
@@ -1539,6 +1626,7 @@ function WorkspaceApp() {
           copyAttendanceLink={copyAttendanceLink}
           decideAttendanceRequest={decideAttendanceRequest}
           decideLeaveRequest={decideLeaveRequest}
+          openLeaveRejection={openLeaveRejection}
           filteredMonthlyWorkers={filteredMonthlyWorkers}
           monthlyAttendanceLoading={monthlyAttendanceLoading}
           monthlyCheckedIns={monthlyCheckedIns}
