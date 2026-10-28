@@ -779,6 +779,10 @@ app.get('/api/leaves', asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.set('Referrer-Policy', 'no-referrer');
   const { worker_id: workerId, token } = req.query;
+  const monthRange = req.query.month == null ? null : attendanceMonthRange(req.query.month);
+  if (req.query.month != null && !monthRange) {
+    return res.status(400).json({ error: 'Provide a valid month in YYYY-MM format' });
+  }
   const worker = await findWorkerForAttendanceToken(workerId, token);
   if (!worker) return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
   const [rows] = await pool.execute(
@@ -788,9 +792,16 @@ app.get('/api/leaves', asyncRoute(async (req, res) => {
             reason, status, rejection_note, created_at, reviewed_at
        FROM leave_requests
       WHERE tenant_id = ? AND worker_id = ?
+        AND (? IS NULL OR (start_date < ? AND end_date >= ?))
       ORDER BY created_at DESC, id DESC
       LIMIT 100`,
-    [worker.tenant_id, worker.worker_id]
+    [
+      worker.tenant_id,
+      worker.worker_id,
+      monthRange?.end || null,
+      monthRange?.end || null,
+      monthRange?.start || null,
+    ]
   );
   res.json({
     data: rows.map((row) => ({ ...row, id: String(row.id), worker_id: String(row.worker_id) })),
@@ -801,6 +812,11 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.set('Referrer-Policy', 'no-referrer');
   const { worker_id: workerId, token } = req.query;
+  const month = req.query.month == null
+    ? new Date().toISOString().slice(0, 7)
+    : req.query.month;
+  const monthRange = attendanceMonthRange(month);
+  if (!monthRange) return res.status(400).json({ error: 'Provide a valid month in YYYY-MM format' });
   if (!validWorkerId(workerId) || !validAttendanceToken(token)) {
     return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
   }
@@ -852,42 +868,10 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
             check_out_latitude, check_out_longitude
        FROM attendance
       WHERE tenant_id = ? AND worker_id = ? AND deleted_at IS NULL
-      ORDER BY attendance_date DESC
-      LIMIT 30`,
-    [row.tenant_id, row.worker_id]
+        AND attendance_date >= ? AND attendance_date < ?
+      ORDER BY attendance_date DESC`,
+    [row.tenant_id, row.worker_id, monthRange.start, monthRange.end]
   );
-  const [rejectedLeaveRows] = await pool.execute(
-    `SELECT id, \`type\`, DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
-            DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
-            reason, rejection_note, reviewed_at, created_at
-       FROM leave_requests
-      WHERE tenant_id = ? AND worker_id = ? AND status = 'rejected'
-        AND (end_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-          OR reviewed_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY))
-      ORDER BY COALESCE(reviewed_at, created_at) DESC, id DESC
-      LIMIT 30`,
-    [row.tenant_id, row.worker_id]
-  );
-  const rejectedLeaveHistory = rejectedLeaveRows.map((request) => ({
-    record_type: 'leave_request',
-    request_id: String(request.id),
-    attendance_date: request.start_date,
-    end_date: request.end_date,
-    status: leaveAttendanceStatus(request.type),
-    attendance_type: leaveAttendanceStatus(request.type),
-    approval_status: 'rejected',
-    leave_request_status: 'rejected',
-    leave_type: request.type,
-    reason: request.reason,
-    rejection_note: request.rejection_note,
-    check_in_time: null,
-    check_out_time: null,
-    reviewed_at: request.reviewed_at,
-  }));
-  const recentAttendance = [...historyRows, ...rejectedLeaveHistory]
-    .sort((first, second) => String(second.attendance_date).localeCompare(String(first.attendance_date))
-      || String(second.reviewed_at || '').localeCompare(String(first.reviewed_at || '')))
-    .slice(0, 30);
   const { tenant_id, token_salt, token_hash, ...attendanceData } = row;
   res.json({
     data: {
@@ -897,7 +881,8 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
       has_evidence: Boolean(attendanceData.has_evidence),
       anti_mock_location_enabled: Boolean(attendanceData.anti_mock_location_enabled),
       locations,
-      recent_attendance: recentAttendance,
+      recent_attendance: historyRows,
+      recent_attendance_month: monthRange.month,
     },
   });
 }));

@@ -205,6 +205,11 @@ function formatLeaveDate(value) {
   });
 }
 
+function currentMonthValue() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function NavigationIcon({ name }) {
   const icons = { request: 'fileCheck', history: 'history', timer: 'clock', auto: 'refresh', account: 'user' };
   return <Icon name={icons[name]} />;
@@ -464,49 +469,38 @@ function TimerPanel({
   );
 }
 
-function HistoryPanel({ records }) {
+function HistoryPanel({ records, month, onMonthChange }) {
   return (
     <section className="attendance-content-card">
       <div className="attendance-section-heading">
-        <div><p className="eyebrow">30 HARI TERAKHIR</p><h2>Riwayat presensi</h2></div>
+        <div><p className="eyebrow">RIWAYAT BULANAN</p><h2>Riwayat presensi</h2></div>
+        <label className="attendance-history-month">
+          <span>Pilih bulan</span>
+          <input type="month" value={month} onChange={(event) => onMonthChange(event.target.value || currentMonthValue())} />
+        </label>
       </div>
       {records.length ? (
         <div className="attendance-history-list">
           {records.map((record) => (
-            <article
-              className={`attendance-history-item ${record.record_type === 'leave_request' ? 'attendance-history-request-rejected' : ''}`}
-              key={record.record_type === 'leave_request' ? `leave-${record.request_id}` : `attendance-${record.attendance_date}`}
-            >
+            <article className="attendance-history-item" key={`attendance-${record.attendance_date}`}>
               <div className="attendance-history-date">
                 <strong>{new Date(`${record.attendance_date}T12:00:00+07:00`).toLocaleDateString('id-ID', {
                   day: '2-digit',
                   month: 'short',
                   timeZone: 'Asia/Jakarta',
                 })}</strong>
-                <small>{record.record_type === 'leave_request'
-                  ? `Pengajuan ${leaveTypeLabel(record.leave_type)} · Ditolak`
-                  : record.approval_status === 'pending'
-                    ? 'Menunggu persetujuan'
-                    : `${statusText(record.status, Boolean(record.check_in_time))}${record.approval_status === 'rejected' ? ' · Ditolak' : ''}`}</small>
+                <small>{record.approval_status === 'pending'
+                  ? 'Menunggu persetujuan'
+                  : `${statusText(record.status, Boolean(record.check_in_time))}${record.approval_status === 'rejected' ? ' · Ditolak' : ''}`}</small>
               </div>
-              {record.record_type === 'leave_request' ? (
-                <div className="attendance-history-request-details">
-                  <span>
-                    Rentang tanggal: {formatLeaveDate(record.attendance_date)} – {formatLeaveDate(record.end_date)}
-                  </span>
-                  <span>Alasan: {record.reason}</span>
-                  {record.rejection_note && <strong>Catatan HR: {record.rejection_note}</strong>}
-                </div>
-              ) : (
-                <div className="attendance-history-times">
-                  <span>Clock In <strong>{formatTime(record.check_in_time)}</strong></span>
-                  <span>Clock Out <strong>{formatTime(record.check_out_time)}</strong></span>
-                </div>
-              )}
+              <div className="attendance-history-times">
+                <span>Clock In <strong>{formatTime(record.check_in_time)}</strong></span>
+                <span>Clock Out <strong>{formatTime(record.check_out_time)}</strong></span>
+              </div>
             </article>
           ))}
         </div>
-      ) : <p className="attendance-muted">Belum ada catatan presensi dalam 30 hari terakhir.</p>}
+      ) : <p className="attendance-muted">Belum ada catatan presensi pada bulan ini.</p>}
       <p className="attendance-privacy-note">Riwayat yang ditampilkan hanya catatan yang sudah tersimpan.</p>
     </section>
   );
@@ -522,6 +516,8 @@ export default function Presensi() {
   const [notice, setNotice] = useState('');
   const [locationWarning, setLocationWarning] = useState('');
   const [section, setSection] = useState('timer');
+  const [attendanceHistoryMonth, setAttendanceHistoryMonth] = useState(currentMonthValue);
+  const [leaveHistoryMonth, setLeaveHistoryMonth] = useState(currentMonthValue);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [activity, setActivity] = useState('regular');
   const [evidenceFile, setEvidenceFile] = useState(null);
@@ -556,9 +552,10 @@ export default function Presensi() {
       setLeaveRequestsLoading(false);
       return () => { active = false; };
     }
-    const query = `?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}`;
+    const attendanceQuery = `?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}&month=${encodeURIComponent(attendanceHistoryMonth)}`;
+    const leaveQuery = `?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}&month=${encodeURIComponent(leaveHistoryMonth)}`;
     const refreshPortalData = () => {
-      publicAttendanceRequest(query)
+      publicAttendanceRequest(attendanceQuery)
         .then((data) => {
           if (active) setAttendance(data);
         })
@@ -568,7 +565,7 @@ export default function Presensi() {
         .finally(() => {
           if (active) setLoading(false);
         });
-      publicLeaveRequest(query)
+      publicLeaveRequest(leaveQuery)
         .then((requests) => {
           if (active && !leaveSubmitLockRef.current) setLeaveRequests(requests);
         })
@@ -585,7 +582,7 @@ export default function Presensi() {
       active = false;
       window.clearInterval(refreshInterval);
     };
-  }, [section, token, workerId]);
+  }, [attendanceHistoryMonth, leaveHistoryMonth, section, token, workerId]);
 
   async function submitLeaveRequest(event) {
     event.preventDefault();
@@ -605,6 +602,7 @@ export default function Presensi() {
     setLeaveError('');
     setLeaveNotice('');
     try {
+      const requestMonth = leaveForm.start_date.slice(0, 7);
       const formData = new FormData();
       Object.entries({
         worker_id: workerId,
@@ -617,12 +615,13 @@ export default function Presensi() {
         method: 'POST',
         body: formData,
       });
+      setLeaveHistoryMonth(requestMonth);
       setLeaveForm({ type: 'izin', start_date: '', end_date: '', reason: '' });
       setLeaveAttachment(null);
       setLeaveNotice('Pengajuan berhasil dikirim dan sedang menunggu tinjauan HR.');
       try {
         const requests = await publicLeaveRequest(
-          `?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}`
+          `?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}&month=${encodeURIComponent(requestMonth)}`
         );
         setLeaveRequests(requests);
       } catch (historyError) {
@@ -890,7 +889,13 @@ export default function Presensi() {
                   onRetryLocation={() => checkConfirmationLocation(confirmation)}
                 />
               )}
-              {section === 'history' && <HistoryPanel records={attendance.recent_attendance || []} />}
+              {section === 'history' && (
+                <HistoryPanel
+                  records={attendance.recent_attendance || []}
+                  month={attendanceHistoryMonth}
+                  onMonthChange={setAttendanceHistoryMonth}
+                />
+              )}
               {section === 'request' && (
                 <section className="attendance-content-card attendance-leave-panel">
                   <div className="attendance-section-heading">
@@ -974,7 +979,17 @@ export default function Presensi() {
                   <div className="attendance-leave-history">
                     <div className="attendance-section-heading">
                       <div><p className="eyebrow">STATUS PERMOHONAN</p><h3>Riwayat pengajuan</h3></div>
-                      <span className="count-pill">{leaveRequests.length} pengajuan</span>
+                      <div className="attendance-leave-history-controls">
+                        <label className="attendance-history-month">
+                          <span>Pilih bulan</span>
+                          <input
+                            type="month"
+                            value={leaveHistoryMonth}
+                            onChange={(event) => setLeaveHistoryMonth(event.target.value || currentMonthValue())}
+                          />
+                        </label>
+                        <span className="count-pill">{leaveRequests.length} pengajuan</span>
+                      </div>
                     </div>
                     {leaveRequestsLoading ? <p className="attendance-muted">Memuat riwayat pengajuan...</p>
                       : leaveRequests.length ? (

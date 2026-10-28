@@ -2207,17 +2207,31 @@ input:focus, select:focus, textarea:focus {
   .leave-review-actions { flex-direction: column-reverse; }
   .leave-review-actions .button { width: 100%; }
 }
-.attendance-history-request-rejected {
-  border-color: #f2d5d5;
-  background: #fffafa;
-}
-.attendance-history-request-details {
+.attendance-history-month {
   display: grid;
-  min-width: 0;
-  gap: 4px;
+  gap: 5px;
   color: var(--muted);
   font-size: 10px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
+  font-weight: 600;
 }
-.attendance-history-request-details strong { color: #963f3f; }
+.attendance-history-month input {
+  min-height: 36px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+}
+.attendance-leave-history-controls {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+}
+@media (max-width: 600px) {
+  .attendance-leave-history-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
