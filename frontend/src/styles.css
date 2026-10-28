@@ -1965,3 +1965,177 @@ input:focus, select:focus, textarea:focus {
   .nav-link, .settings-tab, .settings-tab .ui-icon, .landing-feature-card,
   .landing-feature-icon .ui-icon, .input, .button { transition: none !important; }
 }
+
+.attendance-client-page {
+  padding-bottom: calc(116px + env(safe-area-inset-bottom));
+  background:
+    radial-gradient(ellipse at 4% 0%, #e8ecff 0, transparent 38%),
+    radial-gradient(ellipse at 96% 28%, #eaf5f1 0, transparent 30%),
+    #f5f7fb;
+}
+.attendance-client-sticky {
+  border-bottom-color: #e5e9f080;
+  background: rgb(247 248 252 / 88%);
+  backdrop-filter: blur(18px) saturate(1.15);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+}
+.attendance-company-brand { gap: 12px; }
+.attendance-company-brand > span:last-child { gap: 5px; }
+.attendance-company-brand strong { font-weight: 750; }
+.attendance-company-brand small { font-size: 10px; font-weight: 500; }
+.attendance-worker-greeting {
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 18px;
+  border: 1px solid rgb(255 255 255 / 84%);
+  border-radius: 24px;
+  background: rgb(255 255 255 / 76%);
+  box-shadow: 0 8px 26px rgb(37 54 84 / 7%), inset 0 1px 0 rgb(255 255 255 / 85%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.attendance-greeting-copy { display: grid; gap: 2px; }
+.attendance-worker-greeting .eyebrow { margin-bottom: 4px; font-weight: 750; }
+.attendance-worker-greeting h1 { margin-bottom: 8px; font-weight: 650; }
+.attendance-worker-greeting h1 span { font-weight: 800; }
+.attendance-worker-role { gap: 8px; }
+.attendance-position-chip, .attendance-date-chip {
+  min-height: 27px;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid rgb(220 226 242 / 58%);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+}
+.attendance-client-content { gap: 15px; }
+.attendance-clock-card {
+  border: 1px solid rgb(255 255 255 / 48%);
+  border-radius: 24px;
+  box-shadow: 0 12px 30px rgb(67 88 199 / 19%), inset 0 1px 0 rgb(255 255 255 / 25%);
+}
+.attendance-log-card,
+.attendance-content-card,
+.attendance-action-card,
+.attendance-state-card {
+  border: 1px solid rgb(226 232 242 / 92%);
+  border-radius: 24px;
+  box-shadow: 0 8px 26px rgb(37 54 84 / 7%), 0 1px 2px rgb(37 54 84 / 3%);
+}
+.attendance-log-card,
+.attendance-content-card { padding: 21px; }
+.attendance-section-heading { gap: 14px; margin-bottom: 16px; }
+.attendance-section-heading h2,
+.attendance-content-card h2 { font-weight: 750; }
+.attendance-action-card { gap: 12px; padding: 19px; }
+.attendance-timeline-item strong { font-weight: 700; }
+.attendance-account-card {
+  gap: 11px;
+  padding: 26px 22px;
+  border-radius: 26px;
+}
+.attendance-account-avatar {
+  width: 64px;
+  height: 64px;
+  margin-bottom: 8px;
+  border-radius: 21px;
+  font-size: 25px;
+}
+.attendance-account-card .eyebrow { margin-bottom: 2px; }
+.attendance-account-card h2 { font-size: 17px; font-weight: 800; }
+.attendance-account-card > p:not(.eyebrow) { margin-top: 1px; font-size: 11px; font-weight: 550; }
+.attendance-account-card > div {
+  min-height: 43px;
+  align-items: center;
+  gap: 14px;
+  margin-top: 2px;
+  padding: 11px 12px 0;
+  border-top: 1px solid #e9edf4;
+  font-size: 10px;
+  font-weight: 550;
+}
+.attendance-account-card > div strong { font-size: 10px; font-weight: 700; }
+.attendance-info-panel { gap: 11px; padding: 23px; border-radius: 24px; }
+.attendance-info-panel h2 { margin-top: 1px; font-weight: 800; }
+.attendance-info-panel p:last-child { max-width: 390px; font-size: 11px; line-height: 1.75; }
+.attendance-bottom-nav {
+  right: 0;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  left: 0;
+  width: min(500px, calc(100% - 24px));
+  min-height: 79px;
+  margin-inline: auto;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgb(225 231 241 / 88%);
+  border-radius: 28px;
+  background: rgb(255 255 255 / 82%);
+  box-shadow: 0 12px 34px rgb(31 48 78 / 14%), 0 2px 8px rgb(31 48 78 / 5%);
+  backdrop-filter: blur(18px) saturate(1.25);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+}
+.attendance-nav-item {
+  gap: 5px;
+  min-height: 54px;
+  border-radius: 16px;
+  font-size: 9px;
+  font-weight: 600;
+  transition: color .18s ease, background-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.attendance-nav-item:not(.primary-nav-item):hover { color: #485dc9; }
+.attendance-nav-item:not(.primary-nav-item).selected {
+  color: #4559cb;
+  background: #eef0ff;
+  box-shadow: inset 0 0 0 1px rgb(218 223 255 / 70%);
+}
+.attendance-nav-item:active:not(:disabled) { transform: scale(.94); }
+.attendance-nav-icon .ui-icon { transition: transform .18s ease; }
+.attendance-nav-item:hover .attendance-nav-icon .ui-icon { transform: translateY(-1px); }
+.attendance-nav-item.primary-nav-item {
+  min-height: 72px;
+  margin-top: -23px;
+  color: #4a5ed0;
+  font-weight: 750;
+  transition: color .18s ease, transform .18s ease;
+}
+.attendance-nav-item.primary-nav-item .attendance-nav-icon {
+  width: 54px;
+  height: 54px;
+  border: 4px solid rgb(255 255 255 / 96%);
+  border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(145deg, #6579ee 0%, #4057ce 100%);
+  box-shadow: 0 8px 20px rgb(69 89 203 / 34%), 0 0 0 5px rgb(232 236 255 / 92%);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.attendance-nav-item.primary-nav-item .attendance-nav-icon .ui-icon { width: 24px; height: 24px; }
+.attendance-nav-item.primary-nav-item:hover:not(:disabled) .attendance-nav-icon {
+  transform: translateY(-2px);
+  box-shadow: 0 11px 23px rgb(69 89 203 / 40%), 0 0 0 5px rgb(232 236 255 / 96%);
+}
+.attendance-nav-item.primary-nav-item.selected { color: #4057ce; }
+.attendance-nav-item.primary-nav-item.selected .attendance-nav-icon {
+  background: linear-gradient(145deg, #4f65dc 0%, #344bbd 100%);
+}
+.attendance-client-footer { padding-top: 2px; line-height: 1.6; }
+
+@media (max-width: 420px) {
+  .attendance-worker-greeting { gap: 12px; padding: 15px; border-radius: 22px; }
+  .attendance-greeting-avatar { width: 46px; height: 46px; flex-basis: 46px; }
+  .attendance-worker-role { gap: 6px; }
+  .attendance-position-chip, .attendance-date-chip { min-height: 25px; padding: 5px 8px; font-size: 8px; }
+  .attendance-log-card, .attendance-content-card { padding: 17px; border-radius: 22px; }
+  .attendance-action-card { padding: 16px; border-radius: 22px; }
+  .attendance-account-card { gap: 10px; padding: 22px 18px; }
+  .attendance-bottom-nav { width: calc(100% - 20px); min-height: 76px; padding: 7px 6px; border-radius: 25px; }
+  .attendance-nav-item { min-height: 51px; border-radius: 14px; }
+  .attendance-nav-item.primary-nav-item { min-height: 69px; margin-top: -21px; }
+  .attendance-nav-item.primary-nav-item .attendance-nav-icon { width: 50px; height: 50px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .attendance-nav-item,
+  .attendance-nav-icon .ui-icon { transition: none !important; }
+  .attendance-nav-item:active:not(:disabled),
+  .attendance-nav-item:hover .attendance-nav-icon .ui-icon,
+  .attendance-nav-item.primary-nav-item:hover:not(:disabled) .attendance-nav-icon { transform: none; }
+}
