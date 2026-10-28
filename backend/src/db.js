@@ -99,6 +99,9 @@ async function initializeDatabase() {
       email_hash BINARY(32) NULL,
       position VARCHAR(150) NOT NULL,
       phone_number VARCHAR(30) NULL,
+      profile_photo_data MEDIUMBLOB NULL,
+      profile_photo_mime_type VARCHAR(32) NULL,
+      profile_photo_updated_at TIMESTAMP NULL DEFAULT NULL,
       national_id CHAR(16) NULL,
       address VARCHAR(500) NULL,
       department VARCHAR(150) NULL,
@@ -399,6 +402,9 @@ async function initializeDatabase() {
 
   const workerColumns = [
     ['phone_number', 'VARCHAR(30) NULL'],
+    ['profile_photo_data', 'MEDIUMBLOB NULL'],
+    ['profile_photo_mime_type', 'VARCHAR(32) NULL'],
+    ['profile_photo_updated_at', 'TIMESTAMP NULL DEFAULT NULL'],
     ['national_id', 'CHAR(16) NULL'],
     ['address', 'VARCHAR(500) NULL'],
     ['department', 'VARCHAR(150) NULL'],

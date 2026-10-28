@@ -585,20 +585,29 @@ async function activeDocumentTypes(tenantId, connection = pool) {
 }
 
 function redactWorkerForViewer(worker, role) {
-  if (role !== 'viewer') return worker;
+  const { profile_photo_updated_at: profilePhotoUpdatedAt, ...workerData } = worker;
+  const safeWorkerData = {
+    ...workerData,
+    has_profile_photo: Boolean(profilePhotoUpdatedAt),
+  };
+  if (role !== 'viewer') return safeWorkerData;
   const {
     phone_number,
     national_id,
     address,
     salary_rate,
-    ...workerData
-  } = worker;
-  return workerData;
+    ...viewerData
+  } = safeWorkerData;
+  return viewerData;
 }
 
 async function getWorker(tenantId, workerId, connection = pool, lock = false) {
   const [rows] = await connection.execute(
-    `SELECT * FROM workers WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL${lock ? ' FOR UPDATE' : ''}`,
+    `SELECT id, tenant_id, full_name, email, email_hash, position, phone_number,
+            profile_photo_updated_at, national_id, address, department, placement_client,
+            work_location, contract_type, offer_date, join_date, salary_rate, status,
+            required_document_types, deleted_at, scheduled_inactive_date, created_at, updated_at
+       FROM workers WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL${lock ? ' FOR UPDATE' : ''}`,
     [workerId, tenantId]
   );
   return rows[0] || null;
@@ -821,7 +830,8 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
     return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
   }
   const [rows] = await pool.execute(
-    `SELECT w.id AS worker_id, w.tenant_id, w.full_name, w.position, t.name AS company_name,
+    `SELECT w.id AS worker_id, w.tenant_id, w.full_name, w.position, w.phone_number,
+            w.profile_photo_updated_at, t.name AS company_name,
             s.token_salt, l.token_hash,
             s.anti_mock_location_enabled,
             DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS attendance_date,
@@ -873,6 +883,9 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
     [row.tenant_id, row.worker_id, monthRange.start, monthRange.end]
   );
   const { tenant_id, token_salt, token_hash, ...attendanceData } = row;
+  const profilePhotoUrl = row.profile_photo_updated_at
+    ? `/api/public/worker-profile/photo?worker_id=${encodeURIComponent(row.worker_id)}&token=${encodeURIComponent(token)}&v=${encodeURIComponent(row.profile_photo_updated_at)}`
+    : null;
   res.json({
     data: {
       ...attendanceData,
@@ -880,11 +893,126 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
       location_id: attendanceData.location_id == null ? null : String(attendanceData.location_id),
       has_evidence: Boolean(attendanceData.has_evidence),
       anti_mock_location_enabled: Boolean(attendanceData.anti_mock_location_enabled),
+      profile_photo_url: profilePhotoUrl,
       locations,
       recent_attendance: historyRows,
       recent_attendance_month: monthRange.month,
     },
   });
+}));
+
+app.get('/api/public/worker-profile/photo', asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  const worker = await findWorkerForAttendanceToken(req.query.worker_id, req.query.token);
+  if (!worker) return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+  const [rows] = await pool.execute(
+    `SELECT profile_photo_data, profile_photo_mime_type
+       FROM workers WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+    [worker.worker_id, worker.tenant_id]
+  );
+  const profile = rows[0];
+  if (!profile?.profile_photo_data || !['image/jpeg', 'image/png'].includes(profile.profile_photo_mime_type)) {
+    return res.status(404).json({ error: 'Profile photo not found' });
+  }
+  res.set({
+    'Content-Type': profile.profile_photo_mime_type,
+    'Content-Length': profile.profile_photo_data.length,
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.send(profile.profile_photo_data);
+}));
+
+app.patch('/api/public/worker-profile', asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  const { worker_id: workerId, token, phone_number: phoneNumber } = req.body || {};
+  const worker = await findWorkerForAttendanceToken(workerId, token);
+  if (!worker) return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+  if (typeof phoneNumber !== 'string'
+    || (phoneNumber.trim() !== '' && !validPhoneNumber(phoneNumber))) {
+    return res.status(400).json({ error: 'Provide a valid phone number or leave it empty to clear it' });
+  }
+  const normalizedPhone = phoneNumber.trim().replace(/\s+/g, ' ') || null;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      `SELECT full_name FROM workers
+        WHERE id = ? AND tenant_id = ? AND status = 'active' AND deleted_at IS NULL
+        FOR UPDATE`,
+      [worker.worker_id, worker.tenant_id]
+    );
+    if (!rows[0]) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+    }
+    await connection.execute(
+      `UPDATE workers SET phone_number = ? WHERE id = ? AND tenant_id = ?`,
+      [normalizedPhone, worker.worker_id, worker.tenant_id]
+    );
+    await connection.execute(
+      `INSERT INTO audit_events
+         (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
+       VALUES (?, NULL, ?, 'worker', 'update', 'worker_profile', ?, 'Nomor telepon diperbarui melalui portal pekerja.')`,
+      [worker.tenant_id, rows[0].full_name, worker.worker_id]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  publishTenantEvent(worker.tenant_id, 'worker_changed', { action: 'profile_update' });
+  publishTenantEvent(worker.tenant_id, 'dashboard_updated', { action: 'profile_update' });
+  res.json({ data: { phone_number: normalizedPhone } });
+}));
+
+app.post('/api/public/worker-profile/photo', profilePhotoUpload.single('photo'), asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  const { worker_id: workerId, token } = req.body || {};
+  const worker = await findWorkerForAttendanceToken(workerId, token);
+  if (!worker) return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+  if (!req.file) return res.status(400).json({ error: 'Choose a JPG or PNG profile photo' });
+  const mimeType = profilePhotoMimeType(req.file.buffer);
+  if (!mimeType) return res.status(400).json({ error: 'Profile photo must be a valid JPG or PNG image' });
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      `SELECT full_name FROM workers
+        WHERE id = ? AND tenant_id = ? AND status = 'active' AND deleted_at IS NULL
+        FOR UPDATE`,
+      [worker.worker_id, worker.tenant_id]
+    );
+    if (!rows[0]) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+    }
+    await connection.execute(
+      `UPDATE workers
+          SET profile_photo_data = ?, profile_photo_mime_type = ?, profile_photo_updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND tenant_id = ?`,
+      [req.file.buffer, mimeType, worker.worker_id, worker.tenant_id]
+    );
+    await connection.execute(
+      `INSERT INTO audit_events
+         (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
+       VALUES (?, NULL, ?, 'worker', 'update', 'worker_profile', ?, 'Foto profil diperbarui melalui portal pekerja.')`,
+      [worker.tenant_id, rows[0].full_name, worker.worker_id]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  publishTenantEvent(worker.tenant_id, 'worker_changed', { action: 'profile_photo_update' });
+  const profilePhotoUrl = `/api/public/worker-profile/photo?worker_id=${encodeURIComponent(worker.worker_id)}&token=${encodeURIComponent(token)}&v=${Date.now()}`;
+  res.json({ data: { profile_photo_url: profilePhotoUrl } });
 }));
 
 app.post('/api/public/attendance', attendanceEvidenceUpload.single('evidence'), asyncRoute(async (req, res) => {
@@ -2535,7 +2663,12 @@ app.get('/api/workers', asyncRoute(async (req, res) => {
   if (status && !WORKER_STATUSES.has(status)) {
     return res.status(400).json({ error: 'Invalid worker status' });
   }
-  const query = `SELECT * FROM workers WHERE tenant_id = ? AND deleted_at IS NULL ${status ? 'AND status = ?' : ''} ORDER BY updated_at DESC, id DESC`;
+  const query = `SELECT id, tenant_id, full_name, email, email_hash, position, phone_number,
+                        profile_photo_updated_at, national_id, address, department, placement_client,
+                        work_location, contract_type, offer_date, join_date, salary_rate, status,
+                        required_document_types, deleted_at, scheduled_inactive_date, created_at, updated_at
+                   FROM workers WHERE tenant_id = ? AND deleted_at IS NULL
+                   ${status ? 'AND status = ?' : ''} ORDER BY updated_at DESC, id DESC`;
   const [rows] = await pool.execute(query, status ? [req.auth.tenantId, status] : [req.auth.tenantId]);
   const data = await Promise.all(rows.map(async (worker) => {
     const documents = await listWorkerDocuments(req.auth.tenantId, worker.id);
@@ -3169,7 +3302,7 @@ app.use((error, req, res, next) => {
     if (error.code === 'LIMIT_FILE_SIZE') {
       const maxSizeMessage = req.originalUrl.startsWith('/api/leaves')
         ? 'Leave attachment must be 5 MB or smaller'
-        : 'Image must be 900 KB or smaller after compression';
+        : 'Profile and attendance images must be 900 KB or smaller';
       return res.status(413).json({ error: maxSizeMessage });
     }
     return res.status(400).json({ error: 'Upload one JPG or PNG image at a time' });

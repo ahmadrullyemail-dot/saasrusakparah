@@ -5,7 +5,7 @@ const NAV_ITEMS = [
   { id: 'request', label: 'Pengajuan', icon: 'request' },
   { id: 'history', label: 'Riwayat', icon: 'history' },
   { id: 'timer', label: 'Timer', icon: 'timer', primary: true },
-  { id: 'auto', label: 'Auto', icon: 'auto' },
+  { id: 'reporting', label: 'Pelaporan', icon: 'reporting' },
   { id: 'account', label: 'Akun', icon: 'account' },
 ];
 
@@ -211,7 +211,7 @@ function currentMonthValue() {
 }
 
 function NavigationIcon({ name }) {
-  const icons = { request: 'fileCheck', history: 'history', timer: 'clock', auto: 'refresh', account: 'user' };
+  const icons = { request: 'fileCheck', history: 'history', timer: 'clock', auto: 'refresh', reporting: 'fileCheck', account: 'user' };
   return <Icon name={icons[name]} />;
 }
 
@@ -528,9 +528,18 @@ export default function Presensi() {
   const [leaveNotice, setLeaveNotice] = useState('');
   const [leaveForm, setLeaveForm] = useState({ type: 'izin', start_date: '', end_date: '', reason: '' });
   const [leaveAttachment, setLeaveAttachment] = useState(null);
+  const [profilePhotoFile, setProfilePhotoFile] = useState(null);
+  const [profilePhotoBusy, setProfilePhotoBusy] = useState(false);
+  const [profilePhotoError, setProfilePhotoError] = useState('');
+  const [profilePhotoNotice, setProfilePhotoNotice] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneError, setPhoneError] = useState('');
+  const [phoneNotice, setPhoneNotice] = useState('');
   const actionLockRef = useRef(false);
   const confirmationSubmitLockRef = useRef(false);
   const leaveSubmitLockRef = useRef(false);
+  const phoneDirtyRef = useRef(false);
   const [{ token, workerId }] = useState(() => {
     const parameters = new URLSearchParams(window.location.search);
     return {
@@ -583,6 +592,78 @@ export default function Presensi() {
       window.clearInterval(refreshInterval);
     };
   }, [attendanceHistoryMonth, leaveHistoryMonth, section, token, workerId]);
+
+  useEffect(() => {
+    if (attendance && !phoneDirtyRef.current) setPhoneNumber(attendance.phone_number || '');
+  }, [attendance?.phone_number]);
+
+  async function saveWorkerPhoneNumber(event) {
+    event.preventDefault();
+    if (phoneBusy) return;
+    const trimmedPhone = phoneNumber.trim();
+    if (trimmedPhone && !/^\+?[\d\s().-]{8,30}$/.test(trimmedPhone)) {
+      setPhoneError('Masukkan nomor telepon valid (8–30 karakter, boleh memakai +, spasi, tanda kurung, titik, atau tanda hubung).');
+      setPhoneNotice('');
+      return;
+    }
+    setPhoneBusy(true);
+    setPhoneError('');
+    setPhoneNotice('');
+    try {
+      const response = await fetch('/api/public/worker-profile', {
+        method: 'PATCH',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ worker_id: workerId, token, phone_number: trimmedPhone }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Nomor telepon tidak dapat disimpan.');
+      setAttendance((current) => ({ ...current, phone_number: result.data.phone_number || null }));
+      setPhoneNumber(result.data.phone_number || '');
+      phoneDirtyRef.current = false;
+      setPhoneNotice('Nomor telepon berhasil diperbarui.');
+    } catch (requestError) {
+      setPhoneError(requestError.message);
+    } finally {
+      setPhoneBusy(false);
+    }
+  }
+
+  async function saveWorkerProfilePhoto(event) {
+    event.preventDefault();
+    if (!profilePhotoFile || profilePhotoBusy) return;
+    if (!['image/jpeg', 'image/png'].includes(profilePhotoFile.type)
+      || profilePhotoFile.size > 900 * 1024) {
+      setProfilePhotoError('Pilih foto JPG/PNG dengan ukuran maksimal 900 KB.');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('worker_id', workerId);
+    formData.append('token', token);
+    formData.append('photo', profilePhotoFile);
+    setProfilePhotoBusy(true);
+    setProfilePhotoError('');
+    setProfilePhotoNotice('');
+    try {
+      const response = await fetch('/api/public/worker-profile/photo', {
+        method: 'POST',
+        cache: 'no-store',
+        body: formData,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Foto profil tidak dapat disimpan.');
+      setAttendance((current) => ({
+        ...current,
+        profile_photo_url: result.data.profile_photo_url,
+      }));
+      setProfilePhotoFile(null);
+      setProfilePhotoNotice('Foto profil berhasil diperbarui.');
+    } catch (requestError) {
+      setProfilePhotoError(requestError.message);
+    } finally {
+      setProfilePhotoBusy(false);
+    }
+  }
 
   async function submitLeaveRequest(event) {
     event.preventDefault();
@@ -1017,22 +1098,92 @@ export default function Presensi() {
                   </div>
                 </section>
               )}
-              {section === 'auto' && (
+              {section === 'reporting' && (
                 <section className="attendance-content-card attendance-info-panel">
-                  <span className="attendance-auto-state"><NavigationIcon name="auto" /> NONAKTIF</span>
-                  <p className="eyebrow">PRESENSI OTOMATIS</p>
-                  <h2>Kontrol tetap di tanganmu</h2>
-                  <p>Clock In dan Clock Out tidak dijalankan otomatis. Tekan tombol Timer agar waktu dan lokasi tercatat saat kamu hadir.</p>
+                  <span className="attendance-info-icon"><NavigationIcon name="history" /></span>
+                  <span className="attendance-auto-state">SEGERA HADIR</span>
+                  <p className="eyebrow">TIMESHEET REPORT</p>
+                  <h2>Pelaporan pekerjaan</h2>
+                  <p>Halaman ini disiapkan untuk pengisian lembar kerja harian atau mingguan. Fitur pelaporan belum tersedia, jadi belum ada data timesheet yang dapat dikirim atau ditinjau.</p>
+                  <div className="attendance-reporting-preview" aria-label="Pratinjau fitur timesheet">
+                    <span><Icon name="calendar" size={15} /> Periode harian / mingguan</span>
+                    <span><Icon name="fileCheck" size={15} /> Ringkasan aktivitas dan jam kerja</span>
+                    <span><Icon name="clock" size={15} /> Status pelaporan</span>
+                  </div>
                 </section>
               )}
               {section === 'account' && (
-                <section className="attendance-content-card attendance-account-card">
-                  <span className="attendance-account-avatar">{attendance.full_name.slice(0, 1).toUpperCase()}</span>
-                  <p className="eyebrow">AKUN PEKERJA</p>
-                  <h2 className="uppercase-text">{attendance.full_name}</h2>
-                  <p className="uppercase-text">{attendance.position}</p>
-                  <div><span>Perusahaan</span><strong className="uppercase-text">{attendance.company_name}</strong></div>
-                  <div><span>ID pekerja</span><strong>{attendance.worker_id}</strong></div>
+                <section className="attendance-content-card attendance-account-page">
+                  <div className="attendance-account-heading">
+                    <div className="attendance-account-avatar">
+                      {attendance.profile_photo_url
+                        ? <img src={attendance.profile_photo_url} alt={`Foto profil ${attendance.full_name}`} />
+                        : attendance.full_name.slice(0, 1).toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="eyebrow">PROFIL PEKERJA</p>
+                      <h2 className="uppercase-text">{attendance.full_name}</h2>
+                      <p className="uppercase-text">{attendance.position || 'Pekerja'}</p>
+                    </div>
+                  </div>
+                  <form className="attendance-profile-photo-form" onSubmit={saveWorkerProfilePhoto}>
+                    <label className="attendance-form-field">Foto profil (JPG/PNG · maksimal 900 KB)
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                        disabled={profilePhotoBusy}
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0] || null;
+                          setProfilePhotoFile(file);
+                          setProfilePhotoError('');
+                          setProfilePhotoNotice('');
+                        }}
+                      />
+                    </label>
+                    <small className="attendance-muted">
+                      Foto disimpan sebagai referensi profil untuk kemungkinan fitur pengenalan wajah. Fitur pengenalan wajah belum diaktifkan.
+                    </small>
+                    {profilePhotoFile && <small className="attendance-profile-file-name">Dipilih: {profilePhotoFile.name}</small>}
+                    {profilePhotoError && <p className="attendance-feedback error" role="alert">{profilePhotoError}</p>}
+                    {profilePhotoNotice && <p className="attendance-feedback success" role="status">{profilePhotoNotice}</p>}
+                    <button className="button primary" type="submit" disabled={!profilePhotoFile || profilePhotoBusy}>
+                      {profilePhotoBusy
+                        ? <><span className="attendance-spinner" aria-hidden="true" /> Menyimpan foto...</>
+                        : 'Simpan foto profil'}
+                    </button>
+                  </form>
+                  <form className="attendance-profile-phone-form" onSubmit={saveWorkerPhoneNumber}>
+                    <label className="attendance-form-field">Nomor telepon
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        maxLength={30}
+                        value={phoneNumber}
+                        onChange={(event) => {
+                          setPhoneNumber(event.target.value);
+                          phoneDirtyRef.current = true;
+                          setPhoneError('');
+                          setPhoneNotice('');
+                        }}
+                        disabled={phoneBusy}
+                        placeholder="Contoh: +62 812 3456 7890"
+                      />
+                    </label>
+                    <small className="attendance-muted">Gunakan 8–30 karakter angka; tanda +, spasi, titik, tanda kurung, dan tanda hubung diperbolehkan.</small>
+                    {phoneError && <p className="attendance-feedback error" role="alert">{phoneError}</p>}
+                    {phoneNotice && <p className="attendance-feedback success" role="status">{phoneNotice}</p>}
+                    <button className="button primary" type="submit" disabled={phoneBusy}>
+                      {phoneBusy
+                        ? <><span className="attendance-spinner" aria-hidden="true" /> Menyimpan...</>
+                        : 'Simpan nomor telepon'}
+                    </button>
+                  </form>
+                  <div className="attendance-account-details">
+                    <div><span>Perusahaan</span><strong className="uppercase-text">{attendance.company_name}</strong></div>
+                    <div><span>ID pekerja</span><strong>{attendance.worker_id}</strong></div>
+                    <div><span>Jabatan</span><strong className="uppercase-text">{attendance.position || '—'}</strong></div>
+                  </div>
                 </section>
               )}
             </div>
