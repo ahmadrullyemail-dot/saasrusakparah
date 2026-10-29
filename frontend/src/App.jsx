@@ -1714,6 +1714,8 @@ function WorkspaceApp() {
           attendanceStatusDrafts={attendanceStatusDrafts}
           attendanceSearch={attendanceSearch}
           busy={busy}
+          companyPortalLink={companyPortalLink}
+          copyToClipboard={copyToClipboard}
           decideAttendanceRequest={decideAttendanceRequest}
           decideLeaveRequest={decideLeaveRequest}
           openLeaveRejection={openLeaveRejection}
