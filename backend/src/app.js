@@ -799,7 +799,7 @@ app.get('/api/leaves', asyncRoute(async (req, res) => {
             DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
             DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
             reason, status, rejection_note, created_at, reviewed_at,
-            (start_date = CURDATE() AND end_date = CURDATE() AND DATE(created_at) = CURDATE()) AS can_delete_today
+            (start_date = CURDATE() AND end_date = CURDATE()) AS can_delete_today
        FROM leave_requests
       WHERE tenant_id = ? AND worker_id = ?
         AND (? IS NULL OR (start_date < ? AND end_date >= ?))
@@ -836,14 +836,13 @@ app.delete('/api/public/leaves/today/:id', asyncRoute(async (req, res) => {
          FROM leave_requests
         WHERE id = ? AND tenant_id = ? AND worker_id = ?
           AND start_date = CURDATE() AND end_date = CURDATE()
-          AND DATE(created_at) = CURDATE()
         FOR UPDATE`,
       [req.params.id, worker.tenant_id, worker.worker_id]
     );
     const request = rows[0];
     if (!request) {
       await connection.rollback();
-      return res.status(409).json({ error: 'Only a request created today for today can be cancelled by the worker' });
+      return res.status(409).json({ error: 'Only a request whose start and end dates are today can be cancelled by the worker' });
     }
     requestDate = request.start_date;
     if (request.status === 'approved') {
@@ -890,8 +889,7 @@ app.delete('/api/public/leaves/today/:id', asyncRoute(async (req, res) => {
     await connection.execute(
       `DELETE FROM leave_requests
         WHERE id = ? AND tenant_id = ? AND worker_id = ?
-          AND start_date = CURDATE() AND end_date = CURDATE()
-          AND DATE(created_at) = CURDATE()`,
+          AND start_date = CURDATE() AND end_date = CURDATE()`,
       [request.id, worker.tenant_id, worker.worker_id]
     );
     attachmentPath = request.attachment_storage_key
