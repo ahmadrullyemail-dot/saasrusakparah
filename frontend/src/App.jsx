@@ -26,7 +26,8 @@ function WorkspaceApp() {
   const [attendanceMonth, setAttendanceMonth] = useState(localDateString().slice(0, 7));
   const [attendanceData, setAttendanceData] = useState({ attendance_date: '', records: [] });
   const [monthlyAttendance, setMonthlyAttendance] = useState({ month: '', days_in_month: 0, records: [] });
-  const [attendanceLinks, setAttendanceLinks] = useState({});
+  const [portalEnrollmentCodes, setPortalEnrollmentCodes] = useState({});
+  const [companyPortalLink, setCompanyPortalLink] = useState('');
   const [attendanceStatusDrafts, setAttendanceStatusDrafts] = useState({});
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [monthlyAttendanceLoading, setMonthlyAttendanceLoading] = useState(false);
@@ -35,7 +36,7 @@ function WorkspaceApp() {
   const [attendancePage, setAttendancePage] = useState(1);
   const [reviewingAttendance, setReviewingAttendance] = useState(null);
   const [attendanceSettings, setAttendanceSettings] = useState({
-    salt_configured: false,
+    company_portal_configured: false,
     anti_mock_location_enabled: false,
     updated_at: null,
   });
@@ -65,6 +66,9 @@ function WorkspaceApp() {
   });
   const [workerModalOpen, setWorkerModalOpen] = useState(false);
   const [editingWorker, setEditingWorker] = useState(null);
+  const [activationWorker, setActivationWorker] = useState(null);
+  const [activationWorkerNumber, setActivationWorkerNumber] = useState('');
+  const [activationError, setActivationError] = useState('');
   const [documentStatus, setDocumentStatus] = useState('pending');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -127,7 +131,10 @@ function WorkspaceApp() {
             refreshTasks.push(
               api(`/attendance?date=${encodeURIComponent(current.attendanceDate)}`).then((data) => {
                 setAttendanceData(data);
-                setAttendanceSettings((settings) => ({ ...settings, salt_configured: data.salt_configured }));
+                setAttendanceSettings((settings) => ({
+                  ...settings,
+                  company_portal_configured: data.company_portal_configured,
+                }));
               }),
               api(`/attendance/month?month=${encodeURIComponent(current.attendanceMonth)}`).then(setMonthlyAttendance)
             );
@@ -237,7 +244,10 @@ function WorkspaceApp() {
     api(`/attendance?date=${encodeURIComponent(attendanceDate)}`)
       .then((data) => {
         setAttendanceData(data);
-        setAttendanceSettings((current) => ({ ...current, salt_configured: data.salt_configured }));
+        setAttendanceSettings((current) => ({
+          ...current,
+          company_portal_configured: data.company_portal_configured,
+        }));
       })
       .catch(showError)
       .finally(() => setAttendanceLoading(false));
@@ -317,40 +327,39 @@ function WorkspaceApp() {
     setDocumentTypes(await api('/document-types'));
   }
 
-  async function createAttendanceLink(workerId) {
-    setError('');
-    setNotice('');
-    try {
-      const { token, worker_id: linkedWorkerId } = await api(`/workers/${workerId}/attendance-link`, { method: 'POST' });
-      const link = `${window.location.origin}/presensi?worker_id=${encodeURIComponent(linkedWorkerId)}&token=${encodeURIComponent(token)}`;
-      setAttendanceLinks((current) => ({ ...current, [workerId]: link }));
-      setNotice('Tautan presensi statis berhasil dimuat. Tautan akan tetap sama hingga salt perusahaan dirotasi.');
-    } catch (requestError) {
-      if (requestError.code === 'ATTENDANCE_SALT_NOT_CONFIGURED') {
-        setError('Tautan presensi belum dapat dibuat. Admin perlu membuka Pengaturan → Pengaturan Presensi lalu membuat salt perusahaan terlebih dahulu.');
-        setNotice('');
-      } else {
-        showError(requestError);
-      }
-    }
-  }
-
-  async function rotateAttendanceSalt() {
+  async function createPortalEnrollmentCode(workerId) {
     setError('');
     setNotice('');
     setBusy(true);
     try {
-      const settings = await api('/admin/attendance-settings/salt', {
+      const { enrollment_code: code, expires_in_minutes: expiresInMinutes } = await api(
+        `/workers/${workerId}/portal-enrollment-code`,
+        { method: 'POST' }
+      );
+      setPortalEnrollmentCodes((current) => ({ ...current, [workerId]: code }));
+      setNotice(`Kode enrollment berlaku ${expiresInMinutes} menit. Berikan kode ini secara pribadi kepada pekerja.`);
+    } catch (requestError) {
+      showError(requestError);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rotateCompanyPortalToken() {
+    setError('');
+    setNotice('');
+    setBusy(true);
+    try {
+      const settings = await api('/admin/attendance-settings/company-token', {
         method: 'POST',
         body: JSON.stringify({ confirm_rotation: true }),
       });
-      setAttendanceSettings(settings);
-      setAttendanceLinks({});
-      setAttendanceData((current) => ({
-        ...current,
-        records: current.records.map((record) => ({ ...record, has_attendance_link: false })),
-      }));
-      setNotice('Salt perusahaan diperbarui. Buat dan bagikan ulang link statis pekerja.');
+      const { company_token: companyToken, ...updatedSettings } = settings;
+      const companyPortalLink = `${window.location.origin}/portal?company_token=${encodeURIComponent(companyToken)}`;
+      setAttendanceSettings((current) => ({ ...current, ...updatedSettings }));
+      setCompanyPortalLink(companyPortalLink);
+      setPortalEnrollmentCodes({});
+      setNotice('Tautan portal perusahaan berhasil dibuat. Bagikan tautan; kode enrollment pekerja harus dikirim terpisah.');
       return true;
     } catch (requestError) {
       showError(requestError);
@@ -375,22 +384,6 @@ function WorkspaceApp() {
       showError(requestError);
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function revokeAttendanceLink(workerId) {
-    setError('');
-    setNotice('');
-    try {
-      await api(`/workers/${workerId}/attendance-link`, { method: 'DELETE' });
-      setAttendanceLinks((current) => {
-        const next = { ...current };
-        delete next[workerId];
-        return next;
-      });
-      setNotice('Tautan presensi berhasil dicabut.');
-    } catch (requestError) {
-      showError(requestError);
     }
   }
 
@@ -491,13 +484,13 @@ function WorkspaceApp() {
     }
   }
 
-  async function copyAttendanceLink(link) {
+  async function copyToClipboard(link) {
     try {
       await navigator.clipboard.writeText(link);
-      setNotice('Tautan presensi disalin.');
+      setNotice('Teks berhasil disalin.');
       setError('');
     } catch {
-      setError('Tautan tidak dapat disalin otomatis. Pilih dan salin tautan yang ditampilkan.');
+      setError('Teks tidak dapat disalin otomatis. Pilih dan salin teks yang ditampilkan.');
       setNotice('');
     }
   }
@@ -582,11 +575,17 @@ function WorkspaceApp() {
       return;
     }
     const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const requiredDocumentTypes = form.getAll('required_document_types');
+    const workerNumber = String(form.get('worker_number') || '').trim();
+    if (workerNumber && workers.some((worker) => worker.status === 'active'
+      && String(worker.worker_number || '').toLocaleLowerCase('id-ID') === workerNumber.toLocaleLowerCase('id-ID'))) {
+      showError(new Error('Nomor pekerja sudah digunakan oleh karyawan aktif'));
+      return;
+    }
     setBusy(true);
     setError('');
     setNotice('');
-    const form = new FormData(formElement);
-    const requiredDocumentTypes = form.getAll('required_document_types');
     try {
       const worker = await api('/workers', {
         method: 'POST',
@@ -594,6 +593,7 @@ function WorkspaceApp() {
           full_name: form.get('full_name'),
           email: form.get('email'),
           phone_number: form.get('phone_number'),
+          worker_number: workerNumber || null,
           national_id: form.get('national_id') || null,
           address: form.get('address') || null,
           department: form.get('department'),
@@ -629,6 +629,13 @@ function WorkspaceApp() {
     event.preventDefault();
     if (!editingWorker || user.role !== 'admin') return;
     const form = new FormData(event.currentTarget);
+    const workerNumber = String(form.get('worker_number') || '').trim();
+    if (workerNumber && workers.some((worker) => String(worker.id) !== String(editingWorker.id)
+      && worker.status === 'active'
+      && String(worker.worker_number || '').toLocaleLowerCase('id-ID') === workerNumber.toLocaleLowerCase('id-ID'))) {
+      showError(new Error('Nomor pekerja sudah digunakan oleh karyawan aktif'));
+      return;
+    }
     setBusy(true);
     setError('');
     setNotice('');
@@ -639,6 +646,7 @@ function WorkspaceApp() {
           full_name: form.get('full_name'),
           email: form.get('email'),
           phone_number: form.get('phone_number'),
+          worker_number: workerNumber || null,
           national_id: form.get('national_id') || null,
           address: form.get('address') || null,
           department: form.get('department'),
@@ -665,7 +673,7 @@ function WorkspaceApp() {
   async function createWorkerWorkbook(rows) {
     const { default: ExcelJS } = await import('exceljs');
     const columns = [
-      'full_name', 'email', 'phone_number', 'national_id', 'address', 'department',
+      'full_name', 'email', 'worker_number', 'phone_number', 'national_id', 'address', 'department',
       'position', 'work_location', 'contract_type', 'offer_date', 'join_date',
       'salary_rate', 'required_document_types',
     ];
@@ -729,6 +737,7 @@ function WorkspaceApp() {
       const aliases = {
         full_name: ['full_name', 'nama', 'nama_lengkap'],
         email: ['email'],
+        worker_number: ['worker_number', 'nomor_pekerja', 'employee_id', 'nomor_karyawan'],
         phone_number: ['phone_number', 'telepon', 'nomor_telepon', 'whatsapp'],
         national_id: ['national_id', 'nik', 'nik_ktp'],
         address: ['address', 'alamat'],
@@ -757,6 +766,7 @@ function WorkspaceApp() {
         return {
           full_name: text('full_name') || '',
           email: text('email') || '',
+          worker_number: text('worker_number'),
           phone_number: text('phone_number') || '',
           national_id: text('national_id'),
           address: text('address'),
@@ -1010,7 +1020,7 @@ function WorkspaceApp() {
   }
 
   async function archiveWorker(workerId) {
-    if (user.role !== 'admin' || !window.confirm('Arsipkan pekerja ini? Data dan riwayat terkait tetap disimpan, tautan presensi akan dicabut.')) return;
+    if (user.role !== 'admin' || !window.confirm('Arsipkan pekerja ini? Data dan riwayat terkait tetap disimpan, sesi portal perangkat akan dicabut.')) return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -1064,7 +1074,13 @@ function WorkspaceApp() {
     }
   }
 
-  async function changeStatus(status, effectiveDate = null) {
+  function openActivationDialog(worker) {
+    setActivationWorker(worker);
+    setActivationWorkerNumber(worker.worker_number || '');
+    setActivationError('');
+  }
+
+  async function changeStatus(status, effectiveDate = null, workerNumber = null) {
     if (!selectedWorker) return;
     setBusy(true);
     setError('');
@@ -1072,16 +1088,44 @@ function WorkspaceApp() {
     try {
       const result = await api(`/workers/${selectedWorker.id}/status`, {
         method: 'PATCH',
-        body: JSON.stringify({ status, ...(status === 'inactive' ? { effective_date: effectiveDate } : {}) }),
+        body: JSON.stringify({
+          status,
+          ...(status === 'inactive' ? { effective_date: effectiveDate } : {}),
+          ...(status === 'active' ? { worker_number: workerNumber } : {}),
+        }),
       });
       await reloadData();
       setNotice(result.scheduled_inactive_date
         ? `Penonaktifan dijadwalkan pada ${result.scheduled_inactive_date}.`
         : `Status pekerja diperbarui menjadi ${STATUS_LABELS[status]}.`);
+      return true;
     } catch (requestError) {
       showError(requestError);
+      if (status === 'active') setActivationError(requestError.message);
+      return false;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function submitWorkerActivation(event) {
+    event.preventDefault();
+    const workerNumber = activationWorkerNumber.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,49}$/.test(workerNumber)) {
+      setActivationError('Nomor pekerja wajib diisi (1–50 karakter: huruf, angka, titik, garis bawah, garis miring, atau tanda hubung).');
+      return;
+    }
+    if (workers.some((worker) => String(worker.id) !== String(activationWorker?.id)
+      && worker.status === 'active'
+      && String(worker.worker_number || '').toLocaleLowerCase('id-ID') === workerNumber.toLocaleLowerCase('id-ID'))) {
+      setActivationError('Nomor pekerja sudah digunakan oleh karyawan aktif');
+      return;
+    }
+    const activated = await changeStatus('active', null, workerNumber);
+    if (activated) {
+      setActivationWorker(null);
+      setActivationWorkerNumber('');
+      setActivationError('');
     }
   }
 
@@ -1318,6 +1362,52 @@ function WorkspaceApp() {
             documentTypesLoading={documentTypesLoading}
             initialWorker={editingWorker}
           />
+        )}
+        {activationWorker && (
+          <div
+            className="worker-activation-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget && !busy) setActivationWorker(null);
+            }}
+          >
+            <form
+              className="worker-activation-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="worker-activation-title"
+              onSubmit={submitWorkerActivation}
+            >
+              <p className="eyebrow">AKTIVASI PEKERJA</p>
+              <h2 id="worker-activation-title">Tetapkan nomor pekerja</h2>
+              <p className="muted">
+                {activationWorker.full_name} akan diaktifkan. Nomor pekerja tetap melekat pada profilnya saat statusnya berubah menjadi nonaktif.
+              </p>
+              <label className="worker-activation-field">
+                Nomor pekerja <span className="required-mark">*</span>
+                <input
+                  autoFocus
+                  className="modal-control"
+                  value={activationWorkerNumber}
+                  onChange={(event) => {
+                    setActivationWorkerNumber(event.target.value);
+                    setActivationError('');
+                  }}
+                  maxLength={50}
+                  pattern="[A-Za-z0-9][A-Za-z0-9._/-]*"
+                  required
+                  disabled={busy}
+                  placeholder="Contoh: EMP-001"
+                />
+              </label>
+              {activationError && <p className="notice error modal-error" role="alert">{activationError}</p>}
+              <div className="modal-actions">
+                <button className="button secondary" type="button" disabled={busy} onClick={() => setActivationWorker(null)}>Batal</button>
+                <button className="button primary" type="submit" disabled={busy}>
+                  {busy ? 'Mengaktifkan…' : 'Simpan & aktifkan'}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
         {leaveRejectionRequest && (
           <div className="leave-review-backdrop">
@@ -1613,7 +1703,7 @@ function WorkspaceApp() {
           activeTab={activeTab}
           attendanceDate={attendanceDate}
           attendanceData={attendanceData}
-          attendanceLinks={attendanceLinks}
+          portalEnrollmentCodes={portalEnrollmentCodes}
           attendanceLoading={attendanceLoading}
           attendanceMonth={attendanceMonth}
           attendancePage={attendancePage}
@@ -1622,8 +1712,8 @@ function WorkspaceApp() {
           attendanceStatusDrafts={attendanceStatusDrafts}
           attendanceSearch={attendanceSearch}
           busy={busy}
-          createAttendanceLink={createAttendanceLink}
-          copyAttendanceLink={copyAttendanceLink}
+          createPortalEnrollmentCode={createPortalEnrollmentCode}
+          copyToClipboard={copyToClipboard}
           decideAttendanceRequest={decideAttendanceRequest}
           decideLeaveRequest={decideLeaveRequest}
           openLeaveRejection={openLeaveRejection}
@@ -1649,7 +1739,6 @@ function WorkspaceApp() {
           user={user}
           visibleMonthlyWorkers={visibleMonthlyWorkers}
           archiveAttendance={archiveAttendance}
-          revokeAttendanceLink={revokeAttendanceLink}
         />
 
         <section
@@ -1712,6 +1801,10 @@ function WorkspaceApp() {
                   <strong>{selectedProfileWorker.eligibility.eligible ? 'Persyaratan dokumen terpenuhi' : 'Persyaratan dokumen belum terpenuhi'}</strong>
                   <span>{selectedProfileWorker.eligibility.eligible ? 'HRD dapat mempertimbangkan aktivasi.' : 'Lengkapi dokumen wajib yang masih kurang atau kedaluwarsa.'}</span>
                 </div>
+                <div className="worker-number-profile">
+                  <span>Nomor pekerja</span>
+                  <strong>{selectedProfileWorker.worker_number || 'Belum ditetapkan'}</strong>
+                </div>
                 <div className="requirement-list">
                   {selectedProfileWorker.eligibility.checks.map((check) => (
                     <div className="requirement-item" key={check.type}>
@@ -1745,7 +1838,7 @@ function WorkspaceApp() {
                 {user.role === 'admin' && <div className="status-controls">
                   {selectedProfileWorker.status === 'offered' && <button className="button secondary" disabled={busy} onClick={() => changeStatus('preactive')}>Pindahkan ke pra-aktif</button>}
                   {['preactive', 'inactive'].includes(selectedProfileWorker.status) && (
-                    <button className="button primary" disabled={busy || !selectedProfileWorker.eligibility.eligible} onClick={() => changeStatus('active')}>
+                    <button className="button primary" disabled={busy || !selectedProfileWorker.eligibility.eligible} onClick={() => openActivationDialog(selectedProfileWorker)}>
                       {selectedProfileWorker.status === 'inactive' ? 'Aktifkan kembali' : 'Aktifkan pekerja'}
                     </button>
                   )}
@@ -1834,7 +1927,9 @@ function WorkspaceApp() {
           subscription={subscription}
           onUpdateAttendanceSecurity={updateAttendanceSecurity}
           attendanceLocations={attendanceLocations}
-          onRotateAttendanceSalt={rotateAttendanceSalt}
+          onRotateAttendanceSalt={rotateCompanyPortalToken}
+          companyPortalLink={companyPortalLink}
+          onCopyCompanyPortalLink={copyToClipboard}
           onCreateAttendanceLocation={createAttendanceLocation}
           onDeleteAttendanceLocation={deleteAttendanceLocation}
           error={error}
@@ -1848,7 +1943,7 @@ function WorkspaceApp() {
 }
 
 function App() {
-  return window.location.pathname === '/presensi' ? <Presensi /> : <WorkspaceApp />;
+  return ['/portal', '/presensi'].includes(window.location.pathname) ? <Presensi /> : <WorkspaceApp />;
 }
 
 export default App;

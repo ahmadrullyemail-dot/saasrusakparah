@@ -35,10 +35,12 @@ const {
   profilePhotoMimeType,
   MAX_PROFILE_PHOTO_BYTES,
   validAttendanceToken,
-  createAttendanceToken,
   hashAttendanceToken,
-  attendanceTokenMatches,
+  validPortalEnrollmentCode,
+  hashPortalEnrollmentCode,
   validWorkerId,
+  validWorkerNumber,
+  normalizeWorkerNumber,
   validCoordinates,
   distanceInMeters,
   implausibleLocationMovement,
@@ -342,26 +344,19 @@ test('profile photo storage stays below legacy MariaDB packet limits', () => {
   assert.ok(MAX_PROFILE_PHOTO_BYTES < 1024 * 1024);
 });
 
-test('attendance links are stable HMAC bearer tokens scoped to worker and tenant', () => {
-  const salt = Buffer.alloc(32, 7);
-  const secret = 'test-secret-that-is-at-least-32-characters-long';
-  const first = createAttendanceToken('12', '34', salt, secret);
-  const repeated = createAttendanceToken('12', '34', salt, secret);
-  const otherWorker = createAttendanceToken('12', '35', salt, secret);
-  const otherTenant = createAttendanceToken('13', '34', salt, secret);
-  const otherSalt = createAttendanceToken('12', '34', Buffer.alloc(32, 8), secret);
-
-  assert.match(first, /^[A-Za-z0-9_-]{43}$/);
-  assert.equal(validAttendanceToken(first), true);
+test('worker portal sessions use UUIDv4 tokens and enrollment codes are stored as hashes', () => {
+  const sessionToken = '123e4567-e89b-42d3-a456-426614174000';
+  const code = 'A1B2C3D4E5F60718';
+  assert.equal(validAttendanceToken(sessionToken), true);
+  assert.equal(validAttendanceToken('123e4567-e89b-12d3-a456-426614174000'), false);
   assert.equal(validAttendanceToken('not-a-token'), false);
-  assert.equal(hashAttendanceToken(first).length, 32);
-  assert.equal(first, repeated);
-  assert.notEqual(first, otherWorker);
-  assert.notEqual(first, otherTenant);
-  assert.notEqual(first, otherSalt);
-  assert.equal(attendanceTokenMatches(first, repeated, hashAttendanceToken(first)), true);
-  assert.equal(attendanceTokenMatches(otherWorker, repeated, hashAttendanceToken(first)), false);
+  assert.equal(hashAttendanceToken(sessionToken).length, 32);
   assert.equal(hashAttendanceToken('invalid'), null);
+  assert.equal(validPortalEnrollmentCode(code), true);
+  assert.equal(validPortalEnrollmentCode('a1b2c3d4e5f60718'), false);
+  assert.equal(validPortalEnrollmentCode('A1B2C3'), false);
+  assert.equal(hashPortalEnrollmentCode(code).length, 32);
+  assert.equal(hashPortalEnrollmentCode('invalid'), null);
 });
 
 test('attendance validates worker IDs and geolocation coordinates', () => {
@@ -376,6 +371,20 @@ test('attendance validates worker IDs and geolocation coordinates', () => {
   assert.equal(validCoordinates(0, -180.01), false);
   assert.equal(validCoordinates('40.7', -73), false);
   assert.equal(validCoordinates(Number.NaN, 0), false);
+});
+
+test('worker numbers accept the documented format and normalize surrounding whitespace', () => {
+  for (const value of ['EMP-001', 'staff_02', 'A/2026.1', '9']) {
+    assert.equal(validWorkerNumber(value), true);
+    assert.equal(normalizeWorkerNumber(value), value);
+  }
+  assert.equal(validWorkerNumber(' EMP-001 '), true);
+  assert.equal(normalizeWorkerNumber(' EMP-001 '), 'EMP-001');
+  assert.equal(validWorkerNumber(''), false);
+  assert.equal(validWorkerNumber('-EMP-001'), false);
+  assert.equal(validWorkerNumber('EMP 001'), false);
+  assert.equal(validWorkerNumber('A'.repeat(51)), false);
+  assert.equal(validWorkerNumber(1001), false);
 });
 
 test('anti-mock movement heuristic rejects physically implausible location jumps', () => {

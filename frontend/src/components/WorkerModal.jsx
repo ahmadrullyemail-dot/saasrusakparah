@@ -68,6 +68,21 @@ export function WorkerModal({ onClose, onSubmit, busy, error, departmentOptions,
               <h3 className="form-section-title" id="personal-section-title">Informasi personal</h3>
               <div className="worker-data-grid">
                 <label className="modal-field"><span>Nama lengkap <span className="required-mark">*</span></span><input className="modal-control uppercase-text" ref={nameInputRef} name="full_name" required maxLength="150" autoComplete="name" defaultValue={initialWorker?.full_name || ''} /></label>
+                <label className="modal-field">Nomor pekerja
+                  <input
+                    className="modal-control"
+                    name="worker_number"
+                    maxLength="50"
+                    pattern="[A-Za-z0-9][A-Za-z0-9._/-]*"
+                    placeholder={initialWorker?.status === 'active' ? 'Wajib untuk pekerja aktif' : 'Diisi sebelum aktivasi'}
+                    defaultValue={initialWorker?.worker_number || ''}
+                    required={initialWorker?.status === 'active'}
+                    aria-describedby="worker-number-help"
+                  />
+                  <small id="worker-number-help" className="rate-hint">
+                    Nomor disimpan pada profil dan tetap melekat saat status pekerja menjadi nonaktif.
+                  </small>
+                </label>
                 <label className="modal-field"><span>Email <span className="required-mark">*</span></span><input className="modal-control" name="email" type="email" required maxLength="254" autoComplete="email" defaultValue={initialWorker?.email || ''} /></label>
                 <label className="modal-field"><span>WhatsApp / telepon <span className="required-mark">*</span></span><input className="modal-control" name="phone_number" type="tel" required maxLength="30" pattern="\+?[\d\s().-]{8,30}" autoComplete="tel" placeholder="+62 812 3456 7890" defaultValue={initialWorker?.phone_number || ''} /></label>
                 <label className="modal-field">NIK KTP<input className="modal-control" name="national_id" inputMode="numeric" pattern="\d{16}" maxLength="16" placeholder="16 digit" defaultValue={initialWorker?.national_id || ''} /></label>

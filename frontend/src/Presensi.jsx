@@ -174,6 +174,18 @@ async function publicAttendanceRequest(path, options) {
   return result.data;
 }
 
+async function publicPortalRequest(path, body) {
+  const response = await fetch(`/api/public/portal/${path}`, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Autentikasi portal gagal.');
+  return result.data;
+}
+
 async function publicLeaveRequest(path, options = {}) {
   const response = await fetch(`/api/leaves${path}`, {
     ...options,
@@ -584,6 +596,11 @@ function HistoryPanel({ records, month, onMonthChange }) {
 export default function Presensi() {
   const [attendance, setAttendance] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [portalChecking, setPortalChecking] = useState(true);
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalError, setPortalError] = useState('');
+  const [workerNumberInput, setWorkerNumberInput] = useState('');
+  const [enrollmentCodeInput, setEnrollmentCodeInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [deletingToday, setDeletingToday] = useState(false);
   const [locationChecking, setLocationChecking] = useState(false);
@@ -617,13 +634,18 @@ export default function Presensi() {
   const leaveSubmitLockRef = useRef(false);
   const deleteTodayLockRef = useRef(false);
   const phoneDirtyRef = useRef(false);
-  const [{ token, workerId }] = useState(() => {
+  const [portalAuth, setPortalAuth] = useState(() => {
     const parameters = new URLSearchParams(window.location.search);
     return {
-      token: parameters.get('token') || '',
-      workerId: parameters.get('worker_id') || '',
+      companyToken: parameters.get('company_token') || '',
+      token: '',
+      workerId: '',
     };
   });
+  const { companyToken, token, workerId } = portalAuth;
+  const portalSessionStorageKey = companyToken
+    ? `rusakparah-worker-portal-session:${companyToken}`
+    : null;
 
   useEffect(() => {
     const timerId = window.setInterval(() => setCurrentTime(new Date()), 1000);
@@ -632,8 +654,49 @@ export default function Presensi() {
 
   useEffect(() => {
     let active = true;
+    if (!companyToken) {
+      setPortalError('Tautan portal perusahaan tidak valid. Gunakan tautan resmi dari HR perusahaan.');
+      setPortalChecking(false);
+      setLoading(false);
+      return () => { active = false; };
+    }
+    let savedSession = null;
+    try {
+      savedSession = JSON.parse(window.localStorage.getItem(portalSessionStorageKey) || 'null');
+    } catch {
+      window.localStorage.removeItem(portalSessionStorageKey);
+    }
+    if (!savedSession || typeof savedSession.session_token !== 'string') {
+      if (!companyToken) setPortalError('Sesi perangkat belum terdaftar. Buka tautan portal perusahaan yang diberikan HR.');
+      setPortalChecking(false);
+      setLoading(false);
+      return () => { active = false; };
+    }
+    publicPortalRequest('verify', {
+      company_token: companyToken,
+      session_token: savedSession.session_token,
+    }).then(({ worker_id: verifiedWorkerId }) => {
+      if (!active) return;
+      setLoading(true);
+      setPortalAuth({
+        companyToken,
+        token: savedSession.session_token,
+        workerId: verifiedWorkerId,
+      });
+      setPortalError('');
+    }).catch(() => {
+      if (!active) return;
+      window.localStorage.removeItem(portalSessionStorageKey);
+      setPortalError('Sesi perangkat tidak berlaku lagi. Daftarkan perangkat kembali menggunakan kode dari HR.');
+    }).finally(() => {
+      if (active) setPortalChecking(false);
+    });
+    return () => { active = false; };
+  }, [companyToken, portalSessionStorageKey]);
+
+  useEffect(() => {
+    let active = true;
     if (!token || !workerId) {
-      setError('Link presensi tidak valid. Gunakan tautan resmi dari HR perusahaan.');
       setLoading(false);
       setLeaveRequestsLoading(false);
       return () => { active = false; };
@@ -669,6 +732,31 @@ export default function Presensi() {
       window.clearInterval(refreshInterval);
     };
   }, [attendanceHistoryMonth, leaveHistoryMonth, section, token, workerId]);
+
+  async function enrollPortalDevice(event) {
+    event.preventDefault();
+    if (portalBusy) return;
+    setPortalBusy(true);
+    setPortalError('');
+    try {
+      const { worker_id: enrolledWorkerId, session_token: sessionToken } = await publicPortalRequest('enroll', {
+        company_token: companyToken,
+        worker_number: workerNumberInput.trim(),
+        enrollment_code: enrollmentCodeInput.trim().toUpperCase(),
+      });
+      const savedSession = { session_token: sessionToken, worker_id: enrolledWorkerId };
+      window.localStorage.setItem(portalSessionStorageKey, JSON.stringify(savedSession));
+      setLoading(true);
+      setPortalAuth({ companyToken, token: sessionToken, workerId: enrolledWorkerId });
+      setWorkerNumberInput('');
+      setEnrollmentCodeInput('');
+      setPortalError('');
+    } catch (requestError) {
+      setPortalError(requestError.message);
+    } finally {
+      setPortalBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (attendance && !phoneDirtyRef.current) setPhoneNumber(attendance.phone_number || '');
@@ -1052,14 +1140,57 @@ export default function Presensi() {
           )}
         </div>
 
-        {loading ? (
+        {portalChecking || (token && loading) ? (
+          <section className="attendance-state-card" role="status">Memuat data pekerja...</section>
+        ) : !token || !workerId ? (
+          <section className="attendance-state-card attendance-state-error" role="alert">
+            <span className="attendance-state-icon"><Icon name="warning" /></span>
+            <h1>{companyToken ? 'Daftarkan perangkat pekerja' : 'Tautan perusahaan tidak valid'}</h1>
+            <p>{companyToken
+              ? 'Masukkan nomor pekerja dan kode enrollment sekali pakai yang diberikan HR untuk menghubungkan perangkat ini.'
+              : portalError || 'Gunakan tautan portal resmi dari HR perusahaan.'}</p>
+            {companyToken && (
+              <form className="attendance-enrollment-form" onSubmit={enrollPortalDevice}>
+                <label className="attendance-form-field">Nomor pekerja
+                  <input
+                    value={workerNumberInput}
+                    onChange={(event) => setWorkerNumberInput(event.target.value)}
+                    required
+                    maxLength={50}
+                    autoComplete="username"
+                    disabled={portalBusy}
+                  />
+                </label>
+                <label className="attendance-form-field">Kode enrollment
+                  <input
+                    value={enrollmentCodeInput}
+                    onChange={(event) => setEnrollmentCodeInput(event.target.value.toUpperCase())}
+                    required
+                    minLength={16}
+                    maxLength={16}
+                    pattern="[A-F0-9]{16}"
+                    autoComplete="one-time-code"
+                    disabled={portalBusy}
+                  />
+                </label>
+                {portalError && <p className="attendance-feedback error" role="alert">{portalError}</p>}
+                <button className="button primary full-width" type="submit" disabled={portalBusy}>
+                  {portalBusy
+                    ? <><span className="attendance-spinner" aria-hidden="true" /> Memverifikasi...</>
+                    : 'Daftarkan perangkat ini'}
+                </button>
+                <small className="attendance-muted">Kode hanya dapat digunakan sekali dan kedaluwarsa setelah 30 menit.</small>
+              </form>
+            )}
+          </section>
+        ) : loading ? (
           <section className="attendance-state-card" role="status">Memuat data pekerja...</section>
         ) : error && !attendance ? (
           <section className="attendance-state-card attendance-state-error" role="alert">
             <span className="attendance-state-icon"><Icon name="warning" /></span>
-            <h1>Link presensi tidak dapat digunakan</h1>
+            <h1>Portal presensi tidak dapat dimuat</h1>
             <p>{error}</p>
-            <small>Pastikan link berasal dari dashboard HR dan memuat ID pekerja serta token yang sah.</small>
+            <small>Hubungi HR/Admin perusahaan untuk memverifikasi akses perangkat ini.</small>
           </section>
         ) : (
           <>

@@ -98,6 +98,7 @@ async function initializeDatabase() {
       email VARCHAR(254) NULL,
       email_hash BINARY(32) NULL,
       position VARCHAR(150) NOT NULL,
+      worker_number VARCHAR(50) NULL,
       phone_number VARCHAR(30) NULL,
       profile_photo_data MEDIUMBLOB NULL,
       profile_photo_mime_type VARCHAR(32) NULL,
@@ -115,11 +116,15 @@ async function initializeDatabase() {
       required_document_types LONGTEXT NOT NULL,
       deleted_at DATETIME NULL,
       scheduled_inactive_date DATE NULL,
+      active_worker_number VARCHAR(50) GENERATED ALWAYS AS (
+        CASE WHEN status = 'active' AND deleted_at IS NULL THEN worker_number ELSE NULL END
+      ) ${generatedColumnStorage},
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       KEY ix_workers_tenant_status (tenant_id, status),
       UNIQUE KEY uq_workers_id_tenant (id, tenant_id),
       UNIQUE KEY uq_workers_tenant_email_hash (tenant_id, email_hash),
+      UNIQUE KEY uq_workers_tenant_active_number (tenant_id, active_worker_number),
       CONSTRAINT fk_workers_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS departments (
@@ -188,10 +193,37 @@ async function initializeDatabase() {
     `CREATE TABLE IF NOT EXISTS tenant_attendance_settings (
       tenant_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
       token_salt BINARY(32) NULL,
+      company_portal_token_hash BINARY(32) NULL,
       anti_mock_location_enabled TINYINT(1) NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       CONSTRAINT fk_attendance_settings_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS worker_portal_sessions (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      tenant_id BIGINT UNSIGNED NOT NULL,
+      worker_id BIGINT UNSIGNED NOT NULL,
+      token_hash BINARY(32) NOT NULL,
+      revoked_at TIMESTAMP NULL,
+      last_seen_at TIMESTAMP NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_worker_portal_session_token (token_hash),
+      KEY ix_worker_portal_session_worker (tenant_id, worker_id, revoked_at),
+      CONSTRAINT fk_worker_portal_session_worker FOREIGN KEY (worker_id, tenant_id) REFERENCES workers(id, tenant_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS worker_portal_enrollment_codes (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      tenant_id BIGINT UNSIGNED NOT NULL,
+      worker_id BIGINT UNSIGNED NOT NULL,
+      code_hash BINARY(32) NOT NULL,
+      created_by BIGINT UNSIGNED NULL,
+      expires_at DATETIME NOT NULL,
+      used_at DATETIME NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_worker_portal_enrollment_code (code_hash),
+      KEY ix_worker_portal_enrollment_worker (tenant_id, worker_id, expires_at, used_at),
+      CONSTRAINT fk_worker_portal_enrollment_worker FOREIGN KEY (worker_id, tenant_id) REFERENCES workers(id, tenant_id) ON DELETE CASCADE,
+      CONSTRAINT fk_worker_portal_enrollment_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
     ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS tenant_document_settings (
       tenant_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
@@ -297,11 +329,22 @@ async function initializeDatabase() {
   if (attendanceSettingColumnMap.get('token_salt') === 'NO') {
     await pool.query('ALTER TABLE tenant_attendance_settings MODIFY COLUMN token_salt BINARY(32) NULL');
   }
+  if (!attendanceSettingColumnMap.has('company_portal_token_hash')) {
+    await pool.query('ALTER TABLE tenant_attendance_settings ADD COLUMN company_portal_token_hash BINARY(32) NULL');
+  }
   if (!attendanceSettingColumnMap.has('anti_mock_location_enabled')) {
     await pool.query(
       'ALTER TABLE tenant_attendance_settings ADD COLUMN anti_mock_location_enabled TINYINT(1) NOT NULL DEFAULT 0'
     );
   }
+  await pool.query(
+    `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+      WHERE revoked_at IS NULL`
+  );
+  await pool.query(
+    `UPDATE tenant_attendance_settings SET token_salt = NULL
+      WHERE token_salt IS NOT NULL`
+  );
 
   const [attendanceColumns] = await pool.execute(
     `SELECT COLUMN_NAME FROM information_schema.COLUMNS
@@ -401,6 +444,7 @@ async function initializeDatabase() {
   }
 
   const workerColumns = [
+    ['worker_number', 'VARCHAR(50) NULL'],
     ['phone_number', 'VARCHAR(30) NULL'],
     ['profile_photo_data', 'MEDIUMBLOB NULL'],
     ['profile_photo_mime_type', 'VARCHAR(32) NULL'],
@@ -418,16 +462,42 @@ async function initializeDatabase() {
   ];
 
   const [existingColumns] = await pool.execute(
-    `SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS
+    `SELECT COLUMN_NAME, DATA_TYPE, GENERATION_EXPRESSION FROM information_schema.COLUMNS
       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'workers'`,
     [databaseName]
   );
   const existingColumnNames = new Set(existingColumns.map(({ COLUMN_NAME }) => COLUMN_NAME));
   const existingColumnTypes = new Map(existingColumns.map(({ COLUMN_NAME, DATA_TYPE }) => [COLUMN_NAME, DATA_TYPE]));
+  const existingWorkerNumberExpression = existingColumns
+    .find(({ COLUMN_NAME }) => COLUMN_NAME === 'active_worker_number')?.GENERATION_EXPRESSION || '';
   for (const [columnName, columnDefinition] of workerColumns) {
     if (!existingColumnNames.has(columnName)) {
       await pool.query(`ALTER TABLE workers ADD COLUMN \`${columnName}\` ${columnDefinition}`);
     }
+  }
+  if (!existingColumnNames.has('active_worker_number')) {
+    await pool.query(
+      `ALTER TABLE workers ADD COLUMN active_worker_number VARCHAR(50)
+       GENERATED ALWAYS AS (
+         CASE WHEN status = 'active' AND deleted_at IS NULL THEN worker_number ELSE NULL END
+       ) ${generatedColumnStorage}`
+    );
+  } else if (!existingWorkerNumberExpression.toLowerCase().includes('deleted_at')) {
+    await pool.query(
+      `ALTER TABLE workers MODIFY COLUMN active_worker_number VARCHAR(50)
+       GENERATED ALWAYS AS (
+         CASE WHEN status = 'active' AND deleted_at IS NULL THEN worker_number ELSE NULL END
+       ) ${generatedColumnStorage}`
+    );
+  }
+  const [workerIndexes] = await pool.execute(
+    `SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'workers'`,
+    [databaseName]
+  );
+  const workerIndexNames = new Set(workerIndexes.map(({ INDEX_NAME }) => INDEX_NAME));
+  if (!workerIndexNames.has('uq_workers_tenant_active_number')) {
+    await pool.query('ALTER TABLE workers ADD UNIQUE KEY uq_workers_tenant_active_number (tenant_id, active_worker_number)');
   }
   for (const column of ['full_name', 'address', 'department', 'position', 'work_location', 'placement_client']) {
     await pool.query(

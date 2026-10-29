@@ -400,6 +400,17 @@ function validPhoneNumber(value) {
   return typeof value === 'string' && /^\+?[\d\s().-]{8,30}$/.test(value.trim());
 }
 
+function validWorkerNumber(value) {
+  return typeof value === 'string'
+    && value.trim().length >= 1
+    && value.trim().length <= 50
+    && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value.trim());
+}
+
+function normalizeWorkerNumber(value) {
+  return value.trim();
+}
+
 function validNationalId(value) {
   return value == null || value === '' || (typeof value === 'string' && /^\d{16}$/.test(value));
 }
@@ -530,49 +541,45 @@ function hashNormalizedText(value) {
 }
 
 function validAttendanceToken(value) {
-  return typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
-}
-
-function createAttendanceToken(tenantId, workerId, salt, secret = getJwtSecret()) {
-  if (!Buffer.isBuffer(salt) || salt.length !== 32) {
-    throw new Error('Attendance token salt must be exactly 32 bytes');
-  }
-  const message = `hrd-attendance-v1\0${tenantId}\0${workerId}\0${salt.toString('hex')}`;
-  return crypto.createHmac('sha256', secret).update(message, 'utf8').digest('base64url');
+  return typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function hashAttendanceToken(token) {
   if (!validAttendanceToken(token)) return null;
+  return crypto.createHash('sha256').update(token, 'utf8').digest();
+}
+
+function hashCompanyPortalToken(token) {
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
   return crypto.createHash('sha256').update(token, 'ascii').digest();
 }
 
-function attendanceTokenMatches(receivedToken, expectedToken, storedHash) {
-  if (!validAttendanceToken(receivedToken) || !validAttendanceToken(expectedToken)
-    || !Buffer.isBuffer(storedHash) || storedHash.length !== 32) return false;
-  const received = Buffer.from(receivedToken, 'ascii');
-  const expected = Buffer.from(expectedToken, 'ascii');
-  const expectedHash = hashAttendanceToken(expectedToken);
-  return crypto.timingSafeEqual(received, expected)
-    && crypto.timingSafeEqual(expectedHash, storedHash);
+function validPortalEnrollmentCode(value) {
+  return typeof value === 'string' && /^[A-F0-9]{16}$/.test(value);
 }
 
-async function findWorkerForAttendanceToken(workerId, token) {
+function hashPortalEnrollmentCode(code) {
+  if (!validPortalEnrollmentCode(code)) return null;
+  return crypto.createHash('sha256').update(code, 'ascii').digest();
+}
+
+async function findWorkerForAttendanceToken(workerId, token, connection = pool, lock = false) {
   if (!validWorkerId(workerId) || !validAttendanceToken(token)) return null;
-  const [rows] = await pool.execute(
-    `SELECT w.id AS worker_id, w.tenant_id, s.token_salt, l.token_hash
+  const [rows] = await connection.execute(
+    `SELECT w.id AS worker_id, w.tenant_id, ps.id AS portal_session_id
        FROM workers w
-       JOIN tenant_attendance_settings s ON s.tenant_id = w.tenant_id
-       JOIN worker_attendance_links l ON l.worker_id = w.id AND l.tenant_id = w.tenant_id
-      WHERE w.id = ? AND l.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL`,
-    [workerId]
+       JOIN worker_portal_sessions ps ON ps.worker_id = w.id AND ps.tenant_id = w.tenant_id
+      WHERE w.id = ? AND ps.token_hash = ? AND ps.revoked_at IS NULL
+        AND w.status = 'active' AND w.deleted_at IS NULL${lock ? ' FOR UPDATE' : ''}`,
+    [workerId, hashAttendanceToken(token)]
   );
   const worker = rows[0];
-  if (!worker || !Buffer.isBuffer(worker.token_salt) || worker.token_salt.length !== 32
-    || !attendanceTokenMatches(
-      token,
-      createAttendanceToken(worker.tenant_id, worker.worker_id, worker.token_salt),
-      worker.token_hash
-    )) return null;
+  if (!worker) return null;
+  await connection.execute(
+    'UPDATE worker_portal_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [worker.portal_session_id]
+  );
   return { worker_id: String(worker.worker_id), tenant_id: String(worker.tenant_id) };
 }
 
@@ -603,7 +610,7 @@ function redactWorkerForViewer(worker, role) {
 
 async function getWorker(tenantId, workerId, connection = pool, lock = false) {
   const [rows] = await connection.execute(
-    `SELECT id, tenant_id, full_name, email, email_hash, position, phone_number,
+    `SELECT id, tenant_id, full_name, email, email_hash, position, worker_number, phone_number,
             profile_photo_updated_at, national_id, address, department, placement_client,
             work_location, contract_type, offer_date, join_date, salary_rate, status,
             required_document_types, deleted_at, scheduled_inactive_date, created_at, updated_at
@@ -675,6 +682,96 @@ function evaluateEligibility(worker, documents, today = new Date().toISOString()
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+app.post('/api/public/portal/enroll', asyncRoute(async (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  if (!takeAuthRateLimit(`portal-enroll:${req.ip || req.socket.remoteAddress || 'unknown'}`)) {
+    return res.status(429).json({ error: 'Pendaftaran terlalu sering dicoba. Coba lagi nanti.' });
+  }
+  const { company_token: companyToken, worker_number: workerNumber, enrollment_code: enrollmentCode } = req.body || {};
+  if (typeof workerNumber !== 'string' || !validWorkerNumber(workerNumber)
+    || !validPortalEnrollmentCode(enrollmentCode)
+    || typeof companyToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(companyToken)) {
+    return res.status(400).json({ error: 'Masukkan nomor pekerja dan kode enrollment yang valid.' });
+  }
+  const connection = await pool.getConnection();
+  let sessionToken;
+  let workerId;
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      `SELECT w.id, w.tenant_id, w.full_name
+         FROM tenant_attendance_settings settings
+         JOIN worker_portal_enrollment_codes codes
+           ON codes.tenant_id = settings.tenant_id
+         JOIN workers w ON w.id = codes.worker_id AND w.tenant_id = codes.tenant_id
+        WHERE settings.company_portal_token_hash = ?
+          AND codes.code_hash = ? AND codes.used_at IS NULL
+          AND codes.expires_at > CURRENT_TIMESTAMP
+          AND LOWER(w.worker_number) = LOWER(?) AND w.status = 'active' AND w.deleted_at IS NULL
+        LIMIT 1 FOR UPDATE`,
+      [hashCompanyPortalToken(companyToken), hashPortalEnrollmentCode(enrollmentCode), workerNumber.trim()]
+    );
+    if (!rows[0]) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Nomor pekerja atau kode enrollment tidak valid, kedaluwarsa, atau sudah digunakan.' });
+    }
+    workerId = String(rows[0].id);
+    sessionToken = crypto.randomUUID();
+    await connection.execute(
+      `UPDATE worker_portal_enrollment_codes
+          SET used_at = CURRENT_TIMESTAMP
+        WHERE code_hash = ? AND used_at IS NULL`,
+      [hashPortalEnrollmentCode(enrollmentCode)]
+    );
+    await connection.execute(
+      `INSERT INTO worker_portal_sessions (tenant_id, worker_id, token_hash)
+       VALUES (?, ?, ?)`,
+      [rows[0].tenant_id, rows[0].id, hashAttendanceToken(sessionToken)]
+    );
+    await connection.execute(
+      `INSERT INTO audit_events
+         (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
+       VALUES (?, NULL, ?, 'worker', 'create', 'worker_portal_session', ?, 'Perangkat pekerja didaftarkan ke portal presensi.')`,
+      [rows[0].tenant_id, rows[0].full_name, workerId]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  res.status(201).json({ data: { worker_id: workerId, session_token: sessionToken } });
+}));
+
+app.post('/api/public/portal/verify', asyncRoute(async (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  if (!takeAuthRateLimit(`portal-verify:${req.ip || req.socket.remoteAddress || 'unknown'}`)) {
+    return res.status(429).json({ error: 'Verifikasi terlalu sering dicoba. Coba lagi nanti.' });
+  }
+  const { company_token: companyToken, session_token: sessionToken } = req.body || {};
+  if (typeof companyToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(companyToken)
+    || !validAttendanceToken(sessionToken)) {
+    return res.status(404).json({ error: 'Sesi portal tidak valid atau telah dicabut.' });
+  }
+  const [rows] = await pool.execute(
+    `SELECT w.id AS worker_id, w.tenant_id, ps.id AS session_id
+       FROM tenant_attendance_settings settings
+       JOIN worker_portal_sessions ps ON ps.tenant_id = settings.tenant_id
+       JOIN workers w ON w.id = ps.worker_id AND w.tenant_id = ps.tenant_id
+      WHERE settings.company_portal_token_hash = ? AND ps.token_hash = ?
+        AND ps.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL
+      LIMIT 1`,
+    [hashCompanyPortalToken(companyToken), hashAttendanceToken(sessionToken)]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Sesi portal tidak valid atau telah dicabut.' });
+  await pool.execute(
+    'UPDATE worker_portal_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [rows[0].session_id]
+  );
+  res.json({ data: { worker_id: String(rows[0].worker_id) } });
+}));
 
 app.post('/api/leaves', leaveAttachmentUpload.single('attachment'), asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -832,7 +929,6 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
   const [rows] = await pool.execute(
     `SELECT w.id AS worker_id, w.tenant_id, w.full_name, w.position, w.phone_number,
             w.profile_photo_updated_at, t.name AS company_name,
-            s.token_salt, l.token_hash,
             s.anti_mock_location_enabled,
             DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS attendance_date,
             a.id AS attendance_record_id, a.status, a.attendance_type, a.approval_status, a.approval_note,
@@ -842,21 +938,19 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
             IF(a.evidence_data IS NULL, 0, 1) AS has_evidence
        FROM workers w
        JOIN tenant_attendance_settings s ON s.tenant_id = w.tenant_id
-       JOIN worker_attendance_links l ON w.id = l.worker_id AND w.tenant_id = l.tenant_id
-       JOIN tenants t ON t.id = l.tenant_id
-       LEFT JOIN attendance a ON a.tenant_id = l.tenant_id AND a.worker_id = l.worker_id
+       JOIN worker_portal_sessions ps ON w.id = ps.worker_id AND w.tenant_id = ps.tenant_id
+       JOIN tenants t ON t.id = ps.tenant_id
+       LEFT JOIN attendance a ON a.tenant_id = ps.tenant_id AND a.worker_id = ps.worker_id
          AND a.attendance_date = CURDATE() AND a.deleted_at IS NULL
-      WHERE w.id = ? AND l.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL`,
-    [workerId]
+      WHERE w.id = ? AND ps.token_hash = ? AND ps.revoked_at IS NULL
+        AND w.status = 'active' AND w.deleted_at IS NULL`,
+    [workerId, hashAttendanceToken(token)]
   );
   const row = rows[0];
-  if (!row || !attendanceTokenMatches(
-    token,
-    createAttendanceToken(row.tenant_id, row.worker_id, row.token_salt),
-    row.token_hash
-  )) {
+  if (!row) {
     return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
   }
+  await pool.execute('UPDATE worker_portal_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?', [hashAttendanceToken(token)]);
   const [locationRows] = await pool.execute(
     `SELECT id, name, latitude, longitude, radius_meters, allowed_activities
        FROM tenant_attendance_locations
@@ -882,7 +976,7 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
       ORDER BY attendance_date DESC`,
     [row.tenant_id, row.worker_id, monthRange.start, monthRange.end]
   );
-  const { tenant_id, token_salt, token_hash, ...attendanceData } = row;
+  const { tenant_id, ...attendanceData } = row;
   const profilePhotoUrl = row.profile_photo_updated_at
     ? `/api/public/worker-profile/photo?worker_id=${encodeURIComponent(row.worker_id)}&token=${encodeURIComponent(token)}&v=${encodeURIComponent(row.profile_photo_updated_at)}`
     : null;
@@ -916,23 +1010,23 @@ app.delete('/api/public/attendance/today', asyncRoute(async (req, res) => {
   try {
     await connection.beginTransaction();
     const [workers] = await connection.execute(
-      `SELECT w.id AS worker_id, w.tenant_id, w.full_name, s.token_salt, l.token_hash
+      `SELECT w.id AS worker_id, w.tenant_id, w.full_name, ps.id AS portal_session_id
          FROM workers w
-         JOIN tenant_attendance_settings s ON s.tenant_id = w.tenant_id
-         JOIN worker_attendance_links l ON l.worker_id = w.id AND l.tenant_id = w.tenant_id
-        WHERE w.id = ? AND l.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL
+         JOIN worker_portal_sessions ps ON ps.worker_id = w.id AND ps.tenant_id = w.tenant_id
+        WHERE w.id = ? AND ps.token_hash = ? AND ps.revoked_at IS NULL
+          AND w.status = 'active' AND w.deleted_at IS NULL
         FOR UPDATE`,
-      [workerId]
+      [workerId, hashAttendanceToken(token)]
     );
     const worker = workers[0];
-    if (!worker || !attendanceTokenMatches(
-      token,
-      createAttendanceToken(worker.tenant_id, worker.worker_id, worker.token_salt),
-      worker.token_hash
-    )) {
+    if (!worker) {
       await connection.rollback();
       return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
     }
+    await connection.execute(
+      'UPDATE worker_portal_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [worker.portal_session_id]
+    );
     tenantId = String(worker.tenant_id);
     const [records] = await connection.execute(
       `SELECT id, attendance_date, status, attendance_type
@@ -1143,23 +1237,25 @@ app.post('/api/public/attendance', attendanceEvidenceUpload.single('evidence'), 
   try {
     await connection.beginTransaction();
     const [workers] = await connection.execute(
-      `SELECT w.id AS worker_id, w.tenant_id, w.full_name, s.token_salt, s.anti_mock_location_enabled, l.token_hash
+      `SELECT w.id AS worker_id, w.tenant_id, w.full_name, s.anti_mock_location_enabled,
+              ps.id AS portal_session_id
          FROM workers w
          JOIN tenant_attendance_settings s ON s.tenant_id = w.tenant_id
-         JOIN worker_attendance_links l ON w.id = l.worker_id AND w.tenant_id = l.tenant_id
-        WHERE w.id = ? AND l.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL
+         JOIN worker_portal_sessions ps ON w.id = ps.worker_id AND w.tenant_id = ps.tenant_id
+        WHERE w.id = ? AND ps.token_hash = ? AND ps.revoked_at IS NULL
+          AND w.status = 'active' AND w.deleted_at IS NULL
         FOR UPDATE`,
-      [workerId]
+      [workerId, hashAttendanceToken(token)]
     );
     const worker = workers[0];
-    if (!worker || !attendanceTokenMatches(
-      token,
-      createAttendanceToken(worker.tenant_id, worker.worker_id, worker.token_salt),
-      worker.token_hash
-    )) {
+    if (!worker) {
       await connection.rollback();
       return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
     }
+    await connection.execute(
+      'UPDATE worker_portal_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [worker.portal_session_id]
+    );
 
     if (worker.anti_mock_location_enabled) {
       const parsedIsMocked = isMockedInput === true || isMockedInput === 'true'
@@ -1668,7 +1764,9 @@ app.use('/api', (req, res, next) => {
       publishTenantEvent(req.auth.tenantId, 'worker_changed', payload);
       publishTenantEvent(req.auth.tenantId, 'dashboard_updated', payload);
       if (path.includes('/documents')) publishTenantEvent(req.auth.tenantId, 'documents_updated', payload);
-      if (path.includes('/attendance-link')) publishTenantEvent(req.auth.tenantId, 'attendance_updated', payload);
+      if (path.includes('/portal-enrollment-code') || path.includes('/portal-sessions')) {
+        publishTenantEvent(req.auth.tenantId, 'attendance_updated', payload);
+      }
     } else if (path.startsWith('/api/attendance')) {
       publishTenantEvent(req.auth.tenantId, 'attendance_updated', payload);
       publishTenantEvent(req.auth.tenantId, 'dashboard_updated', payload);
@@ -1873,14 +1971,14 @@ app.get('/api/history', requireManager, asyncRoute(async (req, res) => {
 
 app.get('/api/admin/attendance-settings', requireAdmin, asyncRoute(async (req, res) => {
   const [rows] = await pool.execute(
-    `SELECT token_salt IS NOT NULL AS salt_configured,
+    `SELECT company_portal_token_hash IS NOT NULL AS company_portal_configured,
             anti_mock_location_enabled, updated_at
        FROM tenant_attendance_settings WHERE tenant_id = ?`,
     [req.auth.tenantId]
   );
   res.json({
     data: {
-      salt_configured: Boolean(rows[0]?.salt_configured),
+      company_portal_configured: Boolean(rows[0]?.company_portal_configured),
       anti_mock_location_enabled: Boolean(rows[0]?.anti_mock_location_enabled),
       updated_at: rows[0]?.updated_at || null,
     },
@@ -1904,14 +2002,14 @@ app.patch('/api/admin/attendance-settings', requireAdmin, asyncRoute(async (req,
     description: `Anti-Mock Location ${enabled ? 'diaktifkan' : 'dinonaktifkan'}.`,
   });
   const [rows] = await pool.execute(
-    `SELECT token_salt IS NOT NULL AS salt_configured,
+    `SELECT company_portal_token_hash IS NOT NULL AS company_portal_configured,
             anti_mock_location_enabled, updated_at
        FROM tenant_attendance_settings WHERE tenant_id = ?`,
     [req.auth.tenantId]
   );
   res.json({
     data: {
-      salt_configured: Boolean(rows[0].salt_configured),
+      company_portal_configured: Boolean(rows[0].company_portal_configured),
       anti_mock_location_enabled: Boolean(rows[0].anti_mock_location_enabled),
       updated_at: rows[0].updated_at,
     },
@@ -1993,26 +2091,31 @@ app.delete('/api/admin/attendance-locations/:id', requireAdmin, asyncRoute(async
   res.status(204).end();
 }));
 
-app.post('/api/admin/attendance-settings/salt', requireAdmin, asyncRoute(async (req, res) => {
+app.post('/api/admin/attendance-settings/company-token', requireAdmin, asyncRoute(async (req, res) => {
   const { confirm_rotation } = req.body || {};
   if (confirm_rotation !== true) {
-    return res.status(400).json({ error: 'Confirm salt generation or rotation explicitly' });
+    return res.status(400).json({ error: 'Confirm company portal link generation or rotation explicitly' });
   }
-  const salt = crypto.randomBytes(32);
+  const companyToken = crypto.randomBytes(32).toString('base64url');
   const connection = await pool.getConnection();
   let updatedAt;
   let antiMockLocationEnabled;
   try {
     await connection.beginTransaction();
     await connection.execute(
-      `INSERT INTO tenant_attendance_settings (tenant_id, token_salt)
+      `INSERT INTO tenant_attendance_settings (tenant_id, company_portal_token_hash)
        VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE token_salt = VALUES(token_salt), updated_at = CURRENT_TIMESTAMP`,
-      [req.auth.tenantId, salt]
+       ON DUPLICATE KEY UPDATE company_portal_token_hash = VALUES(company_portal_token_hash), updated_at = CURRENT_TIMESTAMP`,
+      [req.auth.tenantId, hashCompanyPortalToken(companyToken)]
     );
     await connection.execute(
-      `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+      `UPDATE worker_portal_sessions SET revoked_at = CURRENT_TIMESTAMP
         WHERE tenant_id = ? AND revoked_at IS NULL`,
+      [req.auth.tenantId]
+    );
+    await connection.execute(
+      `UPDATE worker_portal_enrollment_codes SET used_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = ? AND used_at IS NULL`,
       [req.auth.tenantId]
     );
     const [rows] = await connection.execute(
@@ -2024,7 +2127,7 @@ app.post('/api/admin/attendance-settings/salt', requireAdmin, asyncRoute(async (
     await recordAudit(req, {
       action: 'update',
       entityType: 'attendance_settings',
-      description: 'Salt perusahaan dibuat atau dirotasi; tautan presensi aktif dicabut.',
+      description: 'Tautan portal perusahaan dibuat atau dirotasi; seluruh sesi perangkat dan kode enrollment dicabut.',
     }, connection);
     await connection.commit();
   } catch (error) {
@@ -2035,9 +2138,10 @@ app.post('/api/admin/attendance-settings/salt', requireAdmin, asyncRoute(async (
   }
   res.json({
     data: {
-      salt_configured: true,
+      company_portal_configured: true,
       anti_mock_location_enabled: antiMockLocationEnabled,
       updated_at: updatedAt,
+      company_token: companyToken,
     },
   });
 }));
@@ -2531,7 +2635,7 @@ app.get('/api/attendance', asyncRoute(async (req, res) => {
   }
   const [dateRows] = await pool.execute(
     `SELECT DATE_FORMAT(COALESCE(?, CURDATE()), '%Y-%m-%d') AS attendance_date,
-            EXISTS(SELECT 1 FROM tenant_attendance_settings WHERE tenant_id = ? AND token_salt IS NOT NULL) AS salt_configured`,
+            EXISTS(SELECT 1 FROM tenant_attendance_settings WHERE tenant_id = ? AND company_portal_token_hash IS NOT NULL) AS company_portal_configured`,
     [requestedDate, req.auth.tenantId]
   );
   const attendanceDate = dateRows[0].attendance_date;
@@ -2541,13 +2645,10 @@ app.get('/api/attendance', asyncRoute(async (req, res) => {
             a.check_in_time, a.check_out_time, a.location_id, a.approved_by, a.approval_updated_at,
             a.check_in_latitude, a.check_in_longitude,
             a.check_out_latitude, a.check_out_longitude,
-            IF(a.evidence_data IS NULL, 0, 1) AS has_evidence,
-            IF(l.worker_id IS NULL, 0, 1) AS has_attendance_link
+            IF(a.evidence_data IS NULL, 0, 1) AS has_evidence
        FROM workers w
        LEFT JOIN attendance a ON a.tenant_id = w.tenant_id AND a.worker_id = w.id
          AND a.attendance_date = ? AND a.deleted_at IS NULL
-       LEFT JOIN worker_attendance_links l ON l.tenant_id = w.tenant_id AND l.worker_id = w.id
-         AND l.revoked_at IS NULL
       WHERE w.tenant_id = ? AND w.status = 'active' AND w.deleted_at IS NULL
       ORDER BY w.full_name, w.id`,
     [attendanceDate, req.auth.tenantId]
@@ -2555,13 +2656,12 @@ app.get('/api/attendance', asyncRoute(async (req, res) => {
   res.json({
     data: {
       attendance_date: attendanceDate,
-      salt_configured: Boolean(dateRows[0].salt_configured),
+      company_portal_configured: Boolean(dateRows[0].company_portal_configured),
       records: rows.map((row) => ({
         ...row,
         worker_id: String(row.worker_id),
         location_id: row.location_id == null ? null : String(row.location_id),
         has_evidence: Boolean(row.has_evidence),
-        has_attendance_link: Boolean(row.has_attendance_link),
       })),
     },
   });
@@ -2747,7 +2847,7 @@ app.get('/api/workers', asyncRoute(async (req, res) => {
   if (status && !WORKER_STATUSES.has(status)) {
     return res.status(400).json({ error: 'Invalid worker status' });
   }
-  const query = `SELECT id, tenant_id, full_name, email, email_hash, position, phone_number,
+  const query = `SELECT id, tenant_id, full_name, email, email_hash, position, worker_number, phone_number,
                         profile_photo_updated_at, national_id, address, department, placement_client,
                         work_location, contract_type, offer_date, join_date, salary_rate, status,
                         required_document_types, deleted_at, scheduled_inactive_date, created_at, updated_at
@@ -2766,10 +2866,9 @@ app.get('/api/workers', asyncRoute(async (req, res) => {
   res.json({ data });
 }));
 
-app.post('/api/workers/:id/attendance-link', requireManager, asyncRoute(async (req, res) => {
+app.post('/api/workers/:id/portal-enrollment-code', requireManager, asyncRoute(async (req, res) => {
   const connection = await pool.getConnection();
-  let token;
-  let workerId;
+  const enrollmentCode = crypto.randomBytes(8).toString('hex').toUpperCase();
   try {
     await connection.beginTransaction();
     const worker = await getWorker(req.auth.tenantId, req.params.id, connection, true);
@@ -2777,30 +2876,34 @@ app.post('/api/workers/:id/attendance-link', requireManager, asyncRoute(async (r
       await connection.rollback();
       return res.status(404).json({ error: 'Active worker not found' });
     }
-    const [settings] = await connection.execute(
-      'SELECT token_salt FROM tenant_attendance_settings WHERE tenant_id = ?',
+    if (!worker.worker_number) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Tetapkan nomor pekerja sebelum menerbitkan kode enrollment portal.' });
+    }
+    const [portalSettings] = await connection.execute(
+      'SELECT company_portal_token_hash FROM tenant_attendance_settings WHERE tenant_id = ? FOR UPDATE',
       [req.auth.tenantId]
     );
-    if (!settings[0]?.token_salt) {
+    if (!portalSettings[0]?.company_portal_token_hash) {
       await connection.rollback();
-      return res.status(409).json({
-        error: 'Configure the company attendance salt in Settings first',
-        code: 'ATTENDANCE_SALT_NOT_CONFIGURED',
-      });
+      return res.status(409).json({ error: 'Admin harus membuat tautan portal perusahaan terlebih dahulu.' });
     }
-    workerId = String(worker.id);
-    token = createAttendanceToken(req.auth.tenantId, workerId, settings[0].token_salt);
     await connection.execute(
-      `INSERT INTO worker_attendance_links (tenant_id, worker_id, token_hash, revoked_at)
-       VALUES (?, ?, ?, NULL)
-       ON DUPLICATE KEY UPDATE token_hash = VALUES(token_hash), revoked_at = NULL, updated_at = CURRENT_TIMESTAMP`,
-      [req.auth.tenantId, worker.id, hashAttendanceToken(token)]
+      `UPDATE worker_portal_enrollment_codes SET used_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = ? AND worker_id = ? AND used_at IS NULL`,
+      [req.auth.tenantId, worker.id]
+    );
+    await connection.execute(
+      `INSERT INTO worker_portal_enrollment_codes
+         (tenant_id, worker_id, code_hash, created_by, expires_at)
+       VALUES (?, ?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 MINUTE))`,
+      [req.auth.tenantId, worker.id, hashPortalEnrollmentCode(enrollmentCode), req.auth.userId]
     );
     await recordAudit(req, {
       action: 'create',
-      entityType: 'attendance_link',
+      entityType: 'portal_enrollment_code',
       entityId: worker.id,
-      description: `Tautan presensi untuk pekerja "${worker.full_name}" dibuat atau diaktifkan kembali.`,
+      description: `Kode enrollment portal untuk pekerja "${worker.full_name}" diterbitkan dan berlaku 30 menit.`,
     }, connection);
     await connection.commit();
   } catch (error) {
@@ -2809,21 +2912,27 @@ app.post('/api/workers/:id/attendance-link', requireManager, asyncRoute(async (r
   } finally {
     connection.release();
   }
-  res.status(201).json({ data: { worker_id: workerId, token } });
+  res.status(201).json({
+    data: {
+      worker_id: String(req.params.id),
+      enrollment_code: enrollmentCode,
+      expires_in_minutes: 30,
+    },
+  });
 }));
 
-app.delete('/api/workers/:id/attendance-link', requireAdmin, asyncRoute(async (req, res) => {
+app.delete('/api/workers/:id/portal-sessions', requireAdmin, asyncRoute(async (req, res) => {
   const [result] = await pool.execute(
-    `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+    `UPDATE worker_portal_sessions SET revoked_at = CURRENT_TIMESTAMP
       WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
     [req.auth.tenantId, req.params.id]
   );
-  if (!result.affectedRows) return res.status(404).json({ error: 'Active attendance link not found' });
+  if (!result.affectedRows) return res.status(404).json({ error: 'Active portal sessions not found' });
   await recordAudit(req, {
     action: 'delete',
-    entityType: 'attendance_link',
+    entityType: 'worker_portal_sessions',
     entityId: req.params.id,
-    description: 'Tautan presensi pekerja dicabut.',
+    description: 'Sesi portal perangkat pekerja dicabut.',
   });
   res.status(204).end();
 }));
@@ -2848,6 +2957,7 @@ app.post('/api/workers', requireManager, asyncRoute(async (req, res) => {
     address,
     department,
     position,
+    worker_number: workerNumberInput,
     work_location,
     contract_type,
     offer_date,
@@ -2855,6 +2965,9 @@ app.post('/api/workers', requireManager, asyncRoute(async (req, res) => {
     salary_rate,
     required_document_types = [],
   } = req.body || {};
+  const workerNumber = workerNumberInput == null || workerNumberInput === ''
+    ? null
+    : validWorkerNumber(workerNumberInput) ? normalizeWorkerNumber(workerNumberInput) : undefined;
   if (typeof full_name !== 'string' || !full_name.trim() || full_name.trim().length > 150
     || typeof position !== 'string' || !position.trim() || position.trim().length > 150
     || (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
@@ -2867,6 +2980,7 @@ app.post('/api/workers', requireManager, asyncRoute(async (req, res) => {
     || !validDate(offer_date) || !validDate(join_date)
     || (offer_date && join_date && join_date < offer_date)
     || !validSalaryRate(salary_rate)
+    || workerNumber === undefined
     || !validRequiredDocuments(required_document_types)) {
     return res.status(400).json({ error: 'Provide valid worker, contact, department, contract, date, rate, and document details' });
   }
@@ -2883,6 +2997,18 @@ app.post('/api/workers', requireManager, asyncRoute(async (req, res) => {
       await connection.rollback();
       return workerQuotaExceeded(res, subscription);
     }
+    if (workerNumber) {
+      const [activeNumberRows] = await connection.execute(
+        `SELECT id FROM workers
+          WHERE tenant_id = ? AND worker_number = ? AND status = 'active' AND deleted_at IS NULL
+          LIMIT 1 FOR UPDATE`,
+        [req.auth.tenantId, workerNumber]
+      );
+      if (activeNumberRows.length) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Nomor pekerja sudah digunakan oleh karyawan aktif' });
+      }
+    }
     const normalizedDepartment = normalizeText(department);
     await connection.execute(
       `INSERT INTO departments (tenant_id, name, name_hash)
@@ -2892,15 +3018,16 @@ app.post('/api/workers', requireManager, asyncRoute(async (req, res) => {
     );
     const [result] = await connection.execute(
       `INSERT INTO workers (
-         tenant_id, full_name, email, email_hash, phone_number, national_id, address,
+         tenant_id, full_name, email, email_hash, worker_number, phone_number, national_id, address,
          department, position, work_location, contract_type, offer_date, join_date,
          salary_rate, status, required_document_types
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offered', ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offered', ?)`,
       [
         req.auth.tenantId,
         normalizeText(full_name),
         email?.trim().toLowerCase() || null,
         email ? hashEmail(email) : null,
+        workerNumber,
         phone_number.trim().replace(/\s+/g, ' '),
         national_id || null,
         address ? normalizeText(address) : null,
@@ -2977,9 +3104,12 @@ app.post('/api/admin/workers/import', requireAdmin, asyncRoute(async (req, res) 
         continue;
       }
       const {
-        full_name, email, phone_number, national_id, address, department, position, work_location,
+        full_name, email, worker_number: workerNumberInput, phone_number, national_id, address, department, position, work_location,
         contract_type, offer_date, join_date, salary_rate, required_document_types = [],
       } = row;
+      const workerNumber = workerNumberInput == null || workerNumberInput === ''
+        ? null
+        : validWorkerNumber(String(workerNumberInput)) ? normalizeWorkerNumber(String(workerNumberInput)) : undefined;
       if (typeof full_name !== 'string' || !full_name.trim() || full_name.trim().length > 150
         || typeof position !== 'string' || !position.trim() || position.trim().length > 150
         || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
@@ -2991,6 +3121,7 @@ app.post('/api/admin/workers/import', requireAdmin, asyncRoute(async (req, res) 
         || !validDate(offer_date) || !validDate(join_date)
         || (offer_date && join_date && join_date < offer_date)
         || !validSalaryRate(salary_rate) || !validRequiredDocuments(required_document_types)
+        || workerNumber === undefined
         || required_document_types.some((type) => !activeTypes.has(type))) {
         errors.push({ row: rowNumber, error: 'Invalid worker fields or inactive required document type' });
         continue;
@@ -3010,6 +3141,18 @@ app.post('/api/admin/workers/import', requireAdmin, asyncRoute(async (req, res) 
         skipped.push({ row: rowNumber, reason: 'Duplicate email' });
         continue;
       }
+      if (workerNumber) {
+        const [activeNumberRows] = await connection.execute(
+          `SELECT id FROM workers
+            WHERE tenant_id = ? AND worker_number = ? AND status = 'active' AND deleted_at IS NULL
+            LIMIT 1`,
+          [req.auth.tenantId, workerNumber]
+        );
+        if (activeNumberRows.length) {
+          skipped.push({ row: rowNumber, reason: 'Nomor pekerja sudah digunakan oleh karyawan aktif' });
+          continue;
+        }
+      }
 
       try {
         await connection.beginTransaction();
@@ -3022,12 +3165,13 @@ app.post('/api/admin/workers/import', requireAdmin, asyncRoute(async (req, res) 
         );
         const [result] = await connection.execute(
           `INSERT INTO workers (
-             tenant_id, full_name, email, email_hash, phone_number, national_id, address,
+             tenant_id, full_name, email, email_hash, worker_number, phone_number, national_id, address,
              department, position, work_location, contract_type, offer_date, join_date,
              salary_rate, status, required_document_types
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offered', ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offered', ?)`,
           [
             req.auth.tenantId, normalizeText(full_name), email.trim().toLowerCase(), emailHash,
+            workerNumber,
             phone_number.trim().replace(/\s+/g, ' '), normalizedNationalId,
             address ? normalizeText(address) : null, normalizedDepartment, normalizeText(position),
             work_location ? normalizeText(work_location) : null, contract_type,
@@ -3088,6 +3232,7 @@ app.patch('/api/workers/:id', requireAdmin, asyncRoute(async (req, res) => {
   const worker = await getWorker(req.auth.tenantId, req.params.id);
   if (!worker) return res.status(404).json({ error: 'Worker not found' });
   const fields = {
+    worker_number: ['worker_number', validWorkerNumber, normalizeWorkerNumber],
     full_name: ['full_name', (value) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 150, normalizeText],
     email: ['email', (value) => typeof value === 'string' && value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()), (value) => value.trim().toLowerCase()],
     phone_number: ['phone_number', validPhoneNumber, (value) => value.trim().replace(/\s+/g, ' ')],
@@ -3102,7 +3247,8 @@ app.patch('/api/workers/:id', requireAdmin, asyncRoute(async (req, res) => {
     salary_rate: ['salary_rate', validSalaryRate, (value) => value || null],
   };
   const body = req.body || {};
-  const updates = Object.entries(fields).filter(([key]) => Object.hasOwn(body, key));
+  const updates = Object.entries(fields).filter(([key]) =>
+    Object.hasOwn(body, key) && !(key === 'worker_number' && (body[key] == null || body[key] === '')));
   const updatesRequiredDocuments = Object.hasOwn(body, 'required_document_types');
   if (!updates.length && !updatesRequiredDocuments) {
     return res.status(400).json({ error: 'Provide valid worker fields to update' });
@@ -3110,6 +3256,21 @@ app.patch('/api/workers/:id', requireAdmin, asyncRoute(async (req, res) => {
   if (updates.some(([key, [, validate]]) => !validate(body[key]))
     || (updatesRequiredDocuments && !validRequiredDocuments(body.required_document_types))) {
     return res.status(400).json({ error: 'Provide valid worker fields to update' });
+  }
+  const requestedWorkerNumber = updates.some(([key]) => key === 'worker_number')
+    ? normalizeWorkerNumber(body.worker_number)
+    : null;
+  if (requestedWorkerNumber) {
+    const [activeNumberRows] = await pool.execute(
+      `SELECT id FROM workers
+        WHERE tenant_id = ? AND worker_number = ? AND status = 'active'
+          AND deleted_at IS NULL AND id <> ?
+        LIMIT 1`,
+      [req.auth.tenantId, requestedWorkerNumber, worker.id]
+    );
+    if (activeNumberRows.length) {
+      return res.status(409).json({ error: 'Nomor pekerja sudah digunakan oleh karyawan aktif' });
+    }
   }
   if (updatesRequiredDocuments) {
     const activeTypes = await activeDocumentTypes(req.auth.tenantId);
@@ -3155,10 +3316,17 @@ app.patch('/api/workers/:id', requireAdmin, asyncRoute(async (req, res) => {
     values.push(JSON.stringify(body.required_document_types));
   }
   values.push(worker.id, req.auth.tenantId);
-  await pool.execute(
-    `UPDATE workers SET ${assignments.join(', ')} WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
-    values
-  );
+  try {
+    await pool.execute(
+      `UPDATE workers SET ${assignments.join(', ')} WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      values
+    );
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY' && requestedWorkerNumber) {
+      return res.status(409).json({ error: 'Nomor pekerja sudah digunakan oleh karyawan aktif' });
+    }
+    throw error;
+  }
   const changedFields = [
     ...updates.map(([key]) => key),
     ...(updatesRequiredDocuments ? ['required_document_types'] : []),
@@ -3195,8 +3363,13 @@ app.delete('/api/workers/:id', requireAdmin, asyncRoute(async (req, res) => {
       return res.status(404).json({ error: 'Worker not found' });
     }
     await connection.execute(
-      `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+      `UPDATE worker_portal_sessions SET revoked_at = CURRENT_TIMESTAMP
         WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
+      [req.auth.tenantId, req.params.id]
+    );
+    await connection.execute(
+      `UPDATE worker_portal_enrollment_codes SET used_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = ? AND worker_id = ? AND used_at IS NULL`,
       [req.auth.tenantId, req.params.id]
     );
     const [workers] = await connection.execute(
@@ -3293,7 +3466,16 @@ app.delete('/api/workers/:id/documents/:documentId', requireAdmin, asyncRoute(as
 }));
 
 app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) => {
-  const { status, effective_date: effectiveDate } = req.body || {};
+  const { status, effective_date: effectiveDate, worker_number: workerNumberInput } = req.body || {};
+  const workerNumber = typeof workerNumberInput === 'string' && validWorkerNumber(workerNumberInput)
+    ? normalizeWorkerNumber(workerNumberInput)
+    : null;
+  if (status === 'active' && !workerNumber) {
+    return res.status(400).json({ error: 'Nomor pekerja wajib diisi saat mengaktifkan pekerja' });
+  }
+  if (workerNumberInput != null && workerNumberInput !== '' && !validWorkerNumber(workerNumberInput)) {
+    return res.status(400).json({ error: 'Nomor pekerja harus 1–50 karakter dan hanya berisi huruf, angka, titik, garis bawah, garis miring, atau tanda hubung' });
+  }
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -3324,6 +3506,19 @@ app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) =
       await connection.rollback();
       return workerQuotaExceeded(res, subscription);
     }
+    if (status === 'active') {
+      const [activeNumberRows] = await connection.execute(
+        `SELECT id FROM workers
+          WHERE tenant_id = ? AND worker_number = ? AND status = 'active'
+            AND deleted_at IS NULL AND id <> ?
+          LIMIT 1 FOR UPDATE`,
+        [req.auth.tenantId, workerNumber, worker.id]
+      );
+      if (activeNumberRows.length) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'Nomor pekerja sudah digunakan oleh karyawan aktif' });
+      }
+    }
     if (status === 'inactive' && effectiveDate && effectiveDate > todayRows[0].today) {
       await connection.execute(
         `UPDATE workers SET scheduled_inactive_date = ?
@@ -3347,13 +3542,22 @@ app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) =
       }
     }
     await connection.execute(
-      'UPDATE workers SET status = ?, scheduled_inactive_date = NULL WHERE id = ? AND tenant_id = ?',
-      [status, worker.id, req.auth.tenantId]
+      `UPDATE workers SET status = ?, scheduled_inactive_date = NULL
+        ${status === 'active' ? ', worker_number = ?' : ''}
+        WHERE id = ? AND tenant_id = ?`,
+      status === 'active'
+        ? [status, workerNumber, worker.id, req.auth.tenantId]
+        : [status, worker.id, req.auth.tenantId]
     );
     if (status === 'inactive') {
       await connection.execute(
-        `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+        `UPDATE worker_portal_sessions SET revoked_at = CURRENT_TIMESTAMP
           WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
+        [req.auth.tenantId, worker.id]
+      );
+      await connection.execute(
+        `UPDATE worker_portal_enrollment_codes SET used_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = ? AND worker_id = ? AND used_at IS NULL`,
         [req.auth.tenantId, worker.id]
       );
     }
@@ -3369,9 +3573,18 @@ app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) =
       description: `Status pekerja "${worker.full_name}" berubah dari ${worker.status} menjadi ${status}.`,
     }, connection);
     await connection.commit();
-    res.json({ data: { id: worker.id, status } });
+    res.json({
+      data: {
+        id: String(worker.id),
+        status,
+        worker_number: status === 'active' ? workerNumber : worker.worker_number,
+      },
+    });
   } catch (error) {
     await connection.rollback();
+    if (error.code === 'ER_DUP_ENTRY' && status === 'active') {
+      return res.status(409).json({ error: 'Nomor pekerja sudah digunakan oleh karyawan aktif' });
+    }
     throw error;
   } finally {
     connection.release();
@@ -3427,8 +3640,13 @@ async function applyScheduledInactivations() {
         [worker.tenant_id, worker.id, worker.status]
       );
       await connection.execute(
-        `UPDATE worker_attendance_links SET revoked_at = CURRENT_TIMESTAMP
+        `UPDATE worker_portal_sessions SET revoked_at = CURRENT_TIMESTAMP
           WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
+        [worker.tenant_id, worker.id]
+      );
+      await connection.execute(
+        `UPDATE worker_portal_enrollment_codes SET used_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = ? AND worker_id = ? AND used_at IS NULL`,
         [worker.tenant_id, worker.id]
       );
       await connection.execute(
@@ -3575,10 +3793,12 @@ module.exports = {
   profilePhotoMimeType,
   MAX_PROFILE_PHOTO_BYTES,
   validAttendanceToken,
-  createAttendanceToken,
   hashAttendanceToken,
-  attendanceTokenMatches,
+  validPortalEnrollmentCode,
+  hashPortalEnrollmentCode,
   validWorkerId,
+  validWorkerNumber,
+  normalizeWorkerNumber,
   validCoordinates,
   distanceInMeters,
   implausibleLocationMovement,

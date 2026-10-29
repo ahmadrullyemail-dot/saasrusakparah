@@ -60,6 +60,8 @@ export function SettingsPanel({
   onUpdateUser,
   onResetPassword,
   attendanceSettings,
+  companyPortalLink,
+  onCopyCompanyPortalLink,
   attendanceLocations,
   subscription,
   onRotateAttendanceSalt,
@@ -124,11 +126,11 @@ export function SettingsPanel({
   }
 
   async function confirmAttendanceSaltChange() {
-    if (attendanceSettings.salt_configured && attendanceSaltConfirmStep === 1) {
+    if (attendanceSettings.company_portal_configured && attendanceSaltConfirmStep === 1) {
       setAttendanceSaltConfirmStep(2);
       return;
     }
-    if (attendanceSettings.salt_configured && attendanceSaltConfirmation !== 'ROTASI SALT') return;
+    if (attendanceSettings.company_portal_configured && attendanceSaltConfirmation !== 'ROTASI TAUTAN') return;
     const saved = await onRotateAttendanceSalt();
     if (saved) {
       setAttendanceSaltConfirmStep(0);
@@ -261,12 +263,18 @@ export function SettingsPanel({
         <>
           <section className="panel settings-card attendance-settings-card" aria-label="Pengaturan presensi perusahaan">
             <div className="panel-heading">
-              <div><p className="eyebrow">KUNCI TAUTAN PRESENSI</p><h2>Salt rahasia perusahaan</h2></div>
-              <span className={`user-state ${attendanceSettings.salt_configured ? 'active' : 'inactive'}`}>
-                {attendanceSettings.salt_configured ? 'Sudah diatur' : 'Belum diatur'}
+              <div><p className="eyebrow">AKSES PORTAL PEKERJA</p><h2>Tautan portal perusahaan</h2></div>
+              <span className={`user-state ${attendanceSettings.company_portal_configured ? 'active' : 'inactive'}`}>
+                {attendanceSettings.company_portal_configured ? 'Sudah dibuat' : 'Belum dibuat'}
               </span>
             </div>
-            <p className="muted">Salt dibuat secara acak dan disimpan hanya di backend. Nilainya tidak ditampilkan atau dikirim ke browser. Link presensi statis dibuat dari ID pekerja, salt ini, dan kunci aplikasi.</p>
+            <p className="muted">Satu URL digunakan bersama untuk perusahaan. Tautan baru hanya ditampilkan setelah dibuat; jika hilang, Admin perlu merotasi tautan (yang mencabut sesi perangkat). Setiap perangkat baru tetap memerlukan kode enrollment sekali pakai yang diterbitkan HR/Admin dan diberikan melalui kanal terpisah.</p>
+            {companyPortalLink && (
+              <div className="attendance-link-box company-portal-link-box">
+                <input aria-label="Tautan portal perusahaan" readOnly value={companyPortalLink} />
+                <button className="button secondary" type="button" onClick={() => onCopyCompanyPortalLink(companyPortalLink)}>Salin tautan</button>
+              </div>
+            )}
             <div className="attendance-security-setting">
               <div>
                 <strong>Anti-Mock Location</strong>
@@ -289,10 +297,10 @@ export function SettingsPanel({
             </p>
             {attendanceSettings.updated_at && <p className="settings-footnote">Terakhir dirotasi: {new Date(attendanceSettings.updated_at).toLocaleString('id-ID')}</p>}
             <div className="attendance-salt-warning">
-              Rotasi salt akan langsung membatalkan semua link presensi yang sudah dibagikan. Setelah rotasi, buat dan bagikan ulang tautan pekerja.
+              Pembuatan/rotasi tautan portal membatalkan seluruh sesi perangkat dan kode enrollment aktif. Pekerja harus membuka tautan baru dan melakukan enrollment kembali.
             </div>
             <button
-              className={`button ${attendanceSettings.salt_configured ? 'danger' : 'primary'}`}
+              className={`button ${attendanceSettings.company_portal_configured ? 'danger' : 'primary'}`}
               type="button"
               disabled={busy}
               onClick={() => {
@@ -300,7 +308,7 @@ export function SettingsPanel({
                 setAttendanceSaltConfirmStep(1);
               }}
             >
-              {attendanceSettings.salt_configured ? 'Rotasi salt perusahaan' : 'Generate salt perusahaan'}
+              {attendanceSettings.company_portal_configured ? 'Rotasi tautan portal' : 'Buat tautan portal'}
             </button>
           </section>
 
@@ -410,20 +418,20 @@ export function SettingsPanel({
               <div>
                 <p className="eyebrow">{attendanceSaltConfirmStep === 2 ? 'KONFIRMASI KEDUA' : 'KONFIRMASI PENGATURAN'}</p>
                 <h2 id="attendance-salt-confirm-title">
-                  {attendanceSaltConfirmStep === 2 ? 'Pastikan rotasi salt' : attendanceSettings.salt_configured ? 'Rotasi salt perusahaan?' : 'Generate salt perusahaan?'}
+                  {attendanceSaltConfirmStep === 2 ? 'Pastikan rotasi tautan portal' : attendanceSettings.company_portal_configured ? 'Rotasi tautan portal?' : 'Buat tautan portal?'}
                 </h2>
               </div>
             </div>
             <p className="confirmation-modal-description" id="attendance-salt-confirm-description">
               {attendanceSaltConfirmStep === 2
-                ? 'Rotasi membatalkan semua link presensi yang sudah dibagikan. Untuk melanjutkan, ketik ROTASI SALT persis seperti tertulis.'
-                : attendanceSettings.salt_configured
-                  ? 'Tindakan ini langsung membatalkan seluruh tautan presensi pekerja. Anda perlu membuat dan membagikan link baru setelahnya.'
-                  : 'Salt rahasia akan dibuat untuk perusahaan dan digunakan saat menerbitkan link presensi statis.'}
+                ? 'Rotasi langsung mencabut seluruh sesi perangkat dan kode enrollment. Untuk melanjutkan, ketik ROTASI TAUTAN persis seperti tertulis.'
+                : attendanceSettings.company_portal_configured
+                  ? 'Tindakan ini langsung membatalkan tautan perusahaan sebelumnya, semua sesi perangkat, dan kode enrollment yang belum dipakai.'
+                  : 'Tautan perusahaan acak akan dibuat. Kode enrollment tetap diperlukan untuk mendaftarkan perangkat pekerja.'}
             </p>
             {attendanceSaltConfirmStep === 2 && (
               <label className="confirmation-input-label" htmlFor="attendance-salt-confirmation">
-                Ketik <strong>ROTASI SALT</strong> untuk mengonfirmasi
+                Ketik <strong>ROTASI TAUTAN</strong> untuk mengonfirmasi
                 <input
                   id="attendance-salt-confirmation"
                   ref={attendanceSaltConfirmationRef}
@@ -431,7 +439,7 @@ export function SettingsPanel({
                   value={attendanceSaltConfirmation}
                   onChange={(event) => setAttendanceSaltConfirmation(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' && attendanceSaltConfirmation === 'ROTASI SALT') {
+                    if (event.key === 'Enter' && attendanceSaltConfirmation === 'ROTASI TAUTAN') {
                       event.preventDefault();
                       confirmAttendanceSaltChange();
                     }
@@ -443,16 +451,16 @@ export function SettingsPanel({
             <div className="confirmation-modal-actions">
               <button className="button secondary" type="button" disabled={busy} onClick={closeAttendanceSaltConfirmation}>Batal</button>
               <button
-                className={`button ${attendanceSettings.salt_configured ? 'danger' : 'primary'}`}
+                className={`button ${attendanceSettings.company_portal_configured ? 'danger' : 'primary'}`}
                 type="button"
-                disabled={busy || (attendanceSaltConfirmStep === 2 && attendanceSaltConfirmation !== 'ROTASI SALT')}
+                disabled={busy || (attendanceSaltConfirmStep === 2 && attendanceSaltConfirmation !== 'ROTASI TAUTAN')}
                 onClick={confirmAttendanceSaltChange}
               >
                 {busy
                   ? 'Memproses...'
                   : attendanceSaltConfirmStep === 2
                     ? 'Konfirmasi rotasi'
-                    : attendanceSettings.salt_configured ? 'Lanjutkan' : 'Generate salt'}
+                    : attendanceSettings.company_portal_configured ? 'Lanjutkan' : 'Buat tautan'}
               </button>
             </div>
           </section>

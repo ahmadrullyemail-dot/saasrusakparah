@@ -1,7 +1,7 @@
 import { attendanceMonthLabel, attendanceMonthSummary, attendanceStatusLabel, formatAttendanceTime, formatCoordinate, monthlyAttendanceCode } from '../lib/hrd.js';
 import { Icon } from './Icon.jsx';
 
-export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLinks, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, createAttendanceLink, copyAttendanceLink, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance, revokeAttendanceLink }) {
+export function AttendancePanel({ activeTab, attendanceDate, attendanceData, portalEnrollmentCodes, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, createPortalEnrollmentCode, copyToClipboard, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance }) {
   return (
 <section
           className="panel attendance-panel"
@@ -243,13 +243,13 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
               />
             </label>
           </div>*/}
-          <p className="muted attendance-link-note">Tautan statis adalah kredensial pribadi pekerja. Tombol Tampilkan link tidak mengubahnya; hanya rotasi salt perusahaan yang membatalkan semua link.</p>
+          <p className="muted attendance-link-note">Semua pekerja menggunakan satu tautan portal perusahaan. Untuk enrollment perangkat baru, terbitkan kode sekali pakai dan sampaikan secara pribadi kepada pekerja.</p>
           <p className="muted attendance-link-note">Koordinat berasal dari browser perangkat dan tidak membuktikan lokasi secara anti-spoofing.</p>
-          {!attendanceSettings.salt_configured && <p className="attendance-salt-warning">Pengaturan salt belum dibuat. Minta Admin perusahaan mengaktifkannya melalui Pengaturan → Pengaturan Presensi.</p>}
+          {!attendanceSettings.company_portal_configured && <p className="attendance-salt-warning">Tautan portal perusahaan belum dibuat. Admin dapat membuatnya melalui Pengaturan → Pengaturan Presensi.</p>}
           {attendanceLoading ? <p className="muted">Memuat rekap presensi...</p> : (
             <div className="table-wrap">
               <table className="attendance-table">
-                <thead><tr><th>Nama pekerja</th><th>Posisi</th><th>Status</th><th>Check-in</th><th>Lokasi check-in</th><th>Check-out</th><th>Lokasi check-out</th><th>Status HR</th><th>Tautan</th><th>Aksi</th></tr></thead>
+                <thead><tr><th>Nama pekerja</th><th>Posisi</th><th>Status</th><th>Check-in</th><th>Lokasi check-in</th><th>Check-out</th><th>Lokasi check-out</th><th>Status HR</th><th>Aktivasi portal</th><th>Aksi</th></tr></thead>
                 <tbody>
                   {attendanceData.records.map((record) => (
                     <tr key={record.worker_id}>
@@ -322,16 +322,15 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
                         ) : '—'}
                       </td>
                       <td className="attendance-link-cell">
-                        {user.role !== 'viewer' && attendanceSettings.salt_configured && (
+                        {user.role !== 'viewer' && attendanceSettings.company_portal_configured && (
                           <>
-                            <button className="button secondary" type="button" onClick={() => createAttendanceLink(record.worker_id)}>
-                              {attendanceLinks[record.worker_id] || record.has_attendance_link ? 'Tampilkan link' : 'Buat tautan'}
+                            <button className="button secondary" type="button" disabled={busy || record.status === 'inactive'} onClick={() => createPortalEnrollmentCode(record.worker_id)}>
+                              {portalEnrollmentCodes[record.worker_id] ? 'Terbitkan kode baru' : 'Buat kode enrollment'}
                             </button>
-                            {attendanceLinks[record.worker_id] && (
+                            {portalEnrollmentCodes[record.worker_id] && (
                               <div className="attendance-link-box">
-                                <input aria-label={`Tautan presensi ${record.full_name}`} readOnly value={attendanceLinks[record.worker_id]} />
-                                <button className="button secondary" type="button" onClick={() => copyAttendanceLink(attendanceLinks[record.worker_id])}>Salin</button>
-                                {user.role === 'admin' && <button className="button danger" type="button" onClick={() => revokeAttendanceLink(record.worker_id)}>Cabut</button>}
+                                <input aria-label={`Kode enrollment ${record.full_name}`} readOnly value={portalEnrollmentCodes[record.worker_id]} />
+                                <button className="button secondary" type="button" onClick={() => copyToClipboard(portalEnrollmentCodes[record.worker_id])}>Salin kode</button>
                               </div>
                             )}
                           </>

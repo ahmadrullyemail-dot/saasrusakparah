@@ -54,6 +54,7 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                     onClick={() => createWorkerWorkbook(workers.map((worker) => ({
                       full_name: worker.full_name,
                       email: worker.email,
+                      worker_number: worker.worker_number || '',
                       phone_number: worker.phone_number,
                       national_id: worker.national_id,
                       address: worker.address,
@@ -109,11 +110,12 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Nama pekerja</th><th>Posisi</th><th>Status</th><th>Kelayakan</th>{user.role === 'admin' && <th>Aksi</th>}</tr></thead>
+                <thead><tr><th>Nama pekerja</th><th>Nomor pekerja</th><th>Posisi</th><th>Status</th><th>Kelayakan</th>{user.role === 'admin' && <th>Aksi</th>}</tr></thead>
                 <tbody>
                   {visibleWorkers.map((worker) => (
                     <tr key={worker.id} className={selectedId === worker.id ? 'selected-row' : ''}>
                       <td><button className="worker-link uppercase-text" onClick={() => setSelectedId(worker.id)}>{worker.full_name}<small className="normal-case">{worker.email || 'Email belum dicatat'}</small></button></td>
+                      <td>{worker.worker_number || <span className="muted">Belum ditetapkan</span>}</td>
                       <td className="uppercase-text">{worker.position}</td>
                       <td><StatusBadge status={worker.status} />{worker.scheduled_inactive_date && <small className="scheduled-inactive-note">Nonaktif mulai {worker.scheduled_inactive_date.slice(0, 10)}</small>}</td>
                       <td><span className={`readiness ${worker.eligibility?.eligible ? 'ready' : 'needs-work'}`}>{worker.eligibility?.eligible ? 'Memenuhi syarat' : 'Perlu dokumen'}</span></td>
@@ -128,7 +130,7 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                     </tr>
                   ))}
                   {!visibleWorkers.length && (
-                    <tr><td colSpan={user.role === 'admin' ? 5 : 4} className="empty-cell">
+                    <tr><td colSpan={user.role === 'admin' ? 6 : 5} className="empty-cell">
                       {workers.length ? 'Tidak ada pekerja yang cocok dengan filter pencarian.' : 'Belum ada data pekerja. Gunakan tombol Tambah Pekerja untuk memulai.'}
                     </td></tr>
                   )}

@@ -504,6 +504,11 @@ fieldset > small { grid-column: 1 / -1; }
 .attendance-link-cell { min-width: 210px; }
 .attendance-link-box { display: grid; grid-template-columns: minmax(100px,1fr) auto auto; gap: 5px; margin-top: 7px; }
 .attendance-link-box input { min-width: 0; padding: 6px; border: 1px solid #dfe5ef; border-radius: 6px; color: #64728a; font-size: 10px; }
+.company-portal-link-box { grid-template-columns: minmax(0,1fr) auto; align-items: center; margin: 0; }
+.attendance-enrollment-form { display: grid; width: min(100%, 390px); gap: 12px; margin-top: 8px; text-align: left; }
+.attendance-enrollment-form .attendance-form-field input { width: 100%; }
+.attendance-enrollment-form .attendance-feedback { margin: 0; }
+.attendance-enrollment-form > small { text-align: center; }
 .attendance-panel { display: grid; gap: 20px; }
 .attendance-month-heading { margin-bottom: 0; }
 .attendance-metric-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 11px; }
@@ -2394,6 +2399,45 @@ input:focus, select:focus, textarea:focus {
 .attendance-delete-modal > p:not(.eyebrow) { margin: 0; color: #77849a; font-size: 11px; line-height: 1.65; }
 .attendance-delete-modal .attendance-feedback { margin: 0; }
 .attendance-delete-actions { display: flex; width: 100%; justify-content: flex-end; gap: 9px; margin-top: 6px; }
+.worker-number-profile {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid #e8ebf3;
+  border-radius: 10px;
+  color: #748198;
+  background: #fafbfe;
+  font-size: 11px;
+}
+.worker-number-profile strong { color: #34435e; font-variant-numeric: tabular-nums; }
+.worker-activation-backdrop {
+  position: fixed;
+  z-index: 1250;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(18 28 45 / 48%);
+}
+.worker-activation-modal {
+  display: grid;
+  width: min(100%, 480px);
+  gap: 13px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 0 24px 72px rgb(22 34 56 / 22%);
+}
+.worker-activation-modal > .eyebrow,
+.worker-activation-modal h2,
+.worker-activation-modal > .muted { margin: 0; }
+.worker-activation-modal h2 { color: var(--ink); font-size: 20px; }
+.worker-activation-modal > .muted { font-size: 12px; line-height: 1.6; }
+.worker-activation-field { display: grid; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 650; }
+.worker-activation-field .modal-control { width: 100%; }
+.worker-activation-modal .notice { margin: 0; }
 @media (max-width: 600px) {
   .attendance-leave-history-controls {
     align-items: stretch;
@@ -2402,4 +2446,7 @@ input:focus, select:focus, textarea:focus {
   .attendance-account-page { padding: 17px; }
   .attendance-delete-actions { flex-direction: column-reverse; }
   .attendance-delete-actions .button { width: 100%; }
+  .worker-activation-modal { padding: 19px; }
+  .worker-activation-modal .modal-actions { flex-direction: column-reverse; }
+  .worker-activation-modal .modal-actions .button { width: 100%; }
 }
