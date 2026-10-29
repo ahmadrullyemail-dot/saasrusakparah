@@ -798,8 +798,7 @@ app.get('/api/leaves', asyncRoute(async (req, res) => {
     `SELECT id, worker_id, \`type\`,
             DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
             DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
-            reason, status, rejection_note, created_at, reviewed_at,
-            (start_date = CURDATE() AND end_date = CURDATE()) AS can_delete_today
+            reason, status, rejection_note, created_at, reviewed_at
        FROM leave_requests
       WHERE tenant_id = ? AND worker_id = ?
         AND (? IS NULL OR (start_date < ? AND end_date >= ?))
@@ -816,100 +815,6 @@ app.get('/api/leaves', asyncRoute(async (req, res) => {
   res.json({
     data: rows.map((row) => ({ ...row, id: String(row.id), worker_id: String(row.worker_id) })),
   });
-}));
-
-app.delete('/api/public/leaves/today/:id', asyncRoute(async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.set('Referrer-Policy', 'no-referrer');
-  const { worker_id: workerId, token } = req.body || {};
-  if (!validWorkerId(req.params.id)) return res.status(400).json({ error: 'Invalid leave request ID' });
-  const worker = await findWorkerForAttendanceToken(workerId, token);
-  if (!worker) return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
-  const connection = await pool.getConnection();
-  let attachmentPath;
-  let requestDate;
-  try {
-    await connection.beginTransaction();
-    const [rows] = await connection.execute(
-      `SELECT id, \`type\`, status, attachment_storage_key,
-              DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date
-         FROM leave_requests
-        WHERE id = ? AND tenant_id = ? AND worker_id = ?
-          AND start_date = CURDATE() AND end_date = CURDATE()
-        FOR UPDATE`,
-      [req.params.id, worker.tenant_id, worker.worker_id]
-    );
-    const request = rows[0];
-    if (!request) {
-      await connection.rollback();
-      return res.status(409).json({ error: 'Only a request whose start and end dates are today can be cancelled by the worker' });
-    }
-    requestDate = request.start_date;
-    if (request.status === 'approved') {
-      const expectedStatus = leaveAttendanceStatus(request.type);
-      const [attendanceRows] = await connection.execute(
-        `SELECT id, check_in_time, check_out_time, status, attendance_type
-           FROM attendance
-          WHERE tenant_id = ? AND worker_id = ? AND attendance_date = CURDATE()
-            AND deleted_at IS NULL
-          FOR UPDATE`,
-        [worker.tenant_id, worker.worker_id]
-      );
-      const attendance = attendanceRows[0];
-      if (attendance && (
-        attendance.check_in_time
-        || attendance.check_out_time
-        || attendance.status !== expectedStatus
-        || attendance.attendance_type !== expectedStatus
-      )) {
-        await connection.rollback();
-        return res.status(409).json({ error: 'Today’s attendance has changed and cannot be cancelled by the worker. Contact HR.' });
-      }
-      if (attendance) {
-        await connection.execute(
-          `UPDATE attendance SET deleted_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND tenant_id = ? AND worker_id = ? AND attendance_date = CURDATE()`,
-          [attendance.id, worker.tenant_id, worker.worker_id]
-        );
-      }
-    }
-    await connection.execute(
-      `INSERT INTO audit_events
-         (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
-       SELECT ?, NULL, w.full_name, 'worker', 'delete', 'leave_request', ?, ?
-         FROM workers w WHERE w.id = ? AND w.tenant_id = ?`,
-      [
-        worker.tenant_id,
-        String(request.id),
-        `Pengajuan ${request.type} untuk ${requestDate} dibatalkan oleh pekerja pada hari yang sama.`,
-        worker.worker_id,
-        worker.tenant_id,
-      ]
-    );
-    await connection.execute(
-      `DELETE FROM leave_requests
-        WHERE id = ? AND tenant_id = ? AND worker_id = ?
-          AND start_date = CURDATE() AND end_date = CURDATE()`,
-      [request.id, worker.tenant_id, worker.worker_id]
-    );
-    attachmentPath = request.attachment_storage_key
-      ? leaveAttachmentStoragePath(request.attachment_storage_key)
-      : null;
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-  if (attachmentPath) await fs.unlink(attachmentPath).catch((error) => {
-    if (error.code !== 'ENOENT') console.error('Unable to remove cancelled leave attachment', error);
-  });
-  publishTenantEvent(worker.tenant_id, 'leave_requests_updated', { action: 'worker_delete_today' });
-  publishTenantEvent(worker.tenant_id, 'attendance_updated', { action: 'worker_delete_today' });
-  publishTenantEvent(worker.tenant_id, 'dashboard_updated', { action: 'worker_delete_today' });
-  publishTenantEvent(worker.tenant_id, 'history_updated', { action: 'worker_delete_today' });
-  res.json({ data: { id: String(req.params.id), attendance_date: requestDate, deleted: true } });
 }));
 
 app.get('/api/public/attendance', asyncRoute(async (req, res) => {
@@ -930,7 +835,6 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
             s.token_salt, l.token_hash,
             s.anti_mock_location_enabled,
             DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS attendance_date,
-            a.id AS attendance_record_id,
             a.status, a.attendance_type, a.approval_status, a.approval_note,
             a.check_in_time, a.check_out_time, a.location_id,
             a.check_in_latitude, a.check_in_longitude,
@@ -995,61 +899,6 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
       recent_attendance_month: monthRange.month,
     },
   });
-}));
-
-app.delete('/api/public/attendance/today', asyncRoute(async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.set('Referrer-Policy', 'no-referrer');
-  const { worker_id: workerId, token } = req.body || {};
-  const worker = await findWorkerForAttendanceToken(workerId, token);
-  if (!worker) return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
-  const connection = await pool.getConnection();
-  let attendanceDate;
-  try {
-    await connection.beginTransaction();
-    const [rows] = await connection.execute(
-      `SELECT id, DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date
-         FROM attendance
-        WHERE tenant_id = ? AND worker_id = ? AND attendance_date = CURDATE()
-          AND deleted_at IS NULL
-        FOR UPDATE`,
-      [worker.tenant_id, worker.worker_id]
-    );
-    if (!rows[0]) {
-      await connection.rollback();
-      return res.status(404).json({ error: 'No attendance record exists for today' });
-    }
-    attendanceDate = rows[0].attendance_date;
-    await connection.execute(
-      `UPDATE attendance SET deleted_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND tenant_id = ? AND worker_id = ?
-          AND attendance_date = CURDATE() AND deleted_at IS NULL`,
-      [rows[0].id, worker.tenant_id, worker.worker_id]
-    );
-    await connection.execute(
-      `INSERT INTO audit_events
-         (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
-       SELECT ?, NULL, w.full_name, 'worker', 'delete', 'attendance', ?, ?
-         FROM workers w WHERE w.id = ? AND w.tenant_id = ?`,
-      [
-        worker.tenant_id,
-        `${worker.worker_id}:${attendanceDate}`,
-        `Catatan presensi hari ini (${attendanceDate}) dibatalkan melalui portal pekerja.`,
-        worker.worker_id,
-        worker.tenant_id,
-      ]
-    );
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-  publishTenantEvent(worker.tenant_id, 'attendance_updated', { action: 'worker_delete_today' });
-  publishTenantEvent(worker.tenant_id, 'dashboard_updated', { action: 'worker_delete_today' });
-  publishTenantEvent(worker.tenant_id, 'history_updated', { action: 'worker_delete_today' });
-  res.json({ data: { attendance_date: attendanceDate, deleted: true } });
 }));
 
 app.get('/api/public/worker-profile/photo', asyncRoute(async (req, res) => {

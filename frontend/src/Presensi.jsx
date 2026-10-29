@@ -252,8 +252,6 @@ function TimerPanel({
   onConfirm,
   onCancel,
   onRetryLocation,
-  onDeleteAttendance,
-  deleteBusy,
 }) {
   const hasCheckIn = Boolean(attendance.check_in_time);
   const hasCheckOut = Boolean(attendance.check_out_time);
@@ -334,20 +332,6 @@ function TimerPanel({
               {hasCheckOut && <span className="attendance-timeline-value"><Icon name="check" size={13} /> Tercatat</span>}
             </div>
           </div>
-        )}
-        {attendance.attendance_record_id
-          && !(attendance.approval_status === 'approved'
-            && ['permission', 'leave', 'sick', 'off'].includes(attendance.attendance_type)) && (
-          <button
-            className="button secondary attendance-delete-today-button"
-            type="button"
-            disabled={deleteBusy || busy}
-            onClick={onDeleteAttendance}
-          >
-            {deleteBusy
-              ? <><span className="attendance-spinner" aria-hidden="true" /> Membatalkan...</>
-              : <><Icon name="trash" size={15} /> Batalkan catatan hari ini</>}
-          </button>
         )}
       </section>
 
@@ -552,12 +536,9 @@ export default function Presensi() {
   const [phoneBusy, setPhoneBusy] = useState(false);
   const [phoneError, setPhoneError] = useState('');
   const [phoneNotice, setPhoneNotice] = useState('');
-  const [todayDeleteTarget, setTodayDeleteTarget] = useState(null);
-  const [todayDeleteBusy, setTodayDeleteBusy] = useState(false);
   const actionLockRef = useRef(false);
   const confirmationSubmitLockRef = useRef(false);
   const leaveSubmitLockRef = useRef(false);
-  const todayDeleteLockRef = useRef(false);
   const phoneDirtyRef = useRef(false);
   const [{ token, workerId }] = useState(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -681,46 +662,6 @@ export default function Presensi() {
       setProfilePhotoError(requestError.message);
     } finally {
       setProfilePhotoBusy(false);
-    }
-  }
-
-  async function deleteTodayRecord() {
-    if (!todayDeleteTarget || todayDeleteLockRef.current) return;
-    todayDeleteLockRef.current = true;
-    setTodayDeleteBusy(true);
-    setError('');
-    setLeaveError('');
-    try {
-      const isLeave = todayDeleteTarget.type === 'leave';
-      const response = await fetch(
-        isLeave
-          ? `/api/public/leaves/today/${encodeURIComponent(todayDeleteTarget.id)}`
-          : '/api/public/attendance/today',
-        {
-          method: 'DELETE',
-          cache: 'no-store',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ worker_id: workerId, token }),
-        }
-      );
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Catatan hari ini tidak dapat dibatalkan.');
-      setTodayDeleteTarget(null);
-      if (isLeave) {
-        const query = `?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}&month=${encodeURIComponent(leaveHistoryMonth)}`;
-        setLeaveRequests(await publicLeaveRequest(query));
-        setLeaveNotice('Pengajuan hari ini berhasil dibatalkan.');
-      } else {
-        const query = `?worker_id=${encodeURIComponent(workerId)}&token=${encodeURIComponent(token)}&month=${encodeURIComponent(attendanceHistoryMonth)}`;
-        setAttendance(await publicAttendanceRequest(query));
-        setNotice('Catatan presensi hari ini berhasil dibatalkan.');
-      }
-    } catch (requestError) {
-      if (todayDeleteTarget.type === 'leave') setLeaveError(requestError.message);
-      else setError(requestError.message);
-    } finally {
-      todayDeleteLockRef.current = false;
-      setTodayDeleteBusy(false);
     }
   }
 
@@ -1027,8 +968,6 @@ export default function Presensi() {
                   onConfirm={confirmAttendanceAction}
                   onCancel={closeActionConfirmation}
                   onRetryLocation={() => checkConfirmationLocation(confirmation)}
-                  onDeleteAttendance={() => setTodayDeleteTarget({ type: 'attendance' })}
-                  deleteBusy={todayDeleteBusy}
                 />
               )}
               {section === 'history' && (
@@ -1152,16 +1091,6 @@ export default function Presensi() {
                                   <span>{request.rejection_note}</span>
                                 </div>
                               )}
-                              {request.can_delete_today && (
-                                <button
-                                  className="button secondary attendance-delete-leave-button"
-                                  type="button"
-                                  disabled={todayDeleteBusy}
-                                  onClick={() => setTodayDeleteTarget({ type: 'leave', id: request.id, label: leaveTypeLabel(request.type) })}
-                                >
-                                  <Icon name="trash" size={14} /> Batalkan pengajuan hari ini
-                                </button>
-                              )}
                             </article>
                           ))}
                         </div>
@@ -1283,61 +1212,6 @@ export default function Presensi() {
               ))}
             </nav>
           </>
-        )}
-        {todayDeleteTarget && (
-          <div
-            className="attendance-delete-backdrop"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget && !todayDeleteBusy) setTodayDeleteTarget(null);
-            }}
-          >
-            <section
-              className="attendance-delete-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="attendance-delete-title"
-              onKeyDown={(event) => {
-                if (event.key === 'Escape' && !todayDeleteBusy) setTodayDeleteTarget(null);
-              }}
-            >
-              <span className="attendance-delete-warning-icon"><Icon name="trash" size={19} /></span>
-              <p className="eyebrow">PEMBATALAN CATATAN</p>
-              <h2 id="attendance-delete-title">
-                Batalkan {todayDeleteTarget.type === 'leave'
-                  ? `pengajuan ${todayDeleteTarget.label || ''}`
-                  : 'presensi hari ini'}?
-              </h2>
-              <p>
-                Tindakan ini hanya tersedia untuk catatan yang dibuat untuk hari ini. Catatan setelah dibatalkan tidak dapat dipulihkan dari portal pekerja.
-              </p>
-              {((todayDeleteTarget.type === 'leave' && leaveError)
-                || (todayDeleteTarget.type === 'attendance' && error)) && (
-                <p className="attendance-feedback error" role="alert">
-                  {todayDeleteTarget.type === 'leave' ? leaveError : error}
-                </p>
-              )}
-              <div className="attendance-delete-actions">
-                <button
-                  className="button secondary"
-                  type="button"
-                  disabled={todayDeleteBusy}
-                  onClick={() => setTodayDeleteTarget(null)}
-                >
-                  Kembali
-                </button>
-                <button
-                  className="button danger"
-                  type="button"
-                  disabled={todayDeleteBusy}
-                  onClick={deleteTodayRecord}
-                >
-                  {todayDeleteBusy
-                    ? <><span className="attendance-spinner" aria-hidden="true" /> Memproses...</>
-                    : 'Ya, batalkan'}
-                </button>
-              </div>
-            </section>
-          </div>
         )}
         <footer className="attendance-client-footer">Lokasi hanya diminta saat mencatat Clock In atau Clock Out.</footer>
       </div>
