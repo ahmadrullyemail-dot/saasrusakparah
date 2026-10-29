@@ -1,7 +1,7 @@
 import { attendanceMonthLabel, attendanceMonthSummary, attendanceStatusLabel, formatAttendanceTime, formatCoordinate, monthlyAttendanceCode } from '../lib/hrd.js';
 import { Icon } from './Icon.jsx';
 
-export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, companyPortalLink, copyToClipboard, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, resetWorkerPortalSession, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance }) {
+export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, companyPortalLink, attendanceStatusDrafts, attendanceSearch, busy, copyToClipboard, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, resetWorkerPortalSession, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance }) {
   return (
 <section
           className="panel attendance-panel"
@@ -243,26 +243,16 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
               />
             </label>
           </div>*/}
-          <section className="panel settings-card attendance-settings-card" aria-label="Tautan portal perusahaan">
-            <div className="panel-heading">
-              <div><p className="eyebrow">AKSES PORTAL PEKERJA</p><h2>Tautan portal perusahaan</h2></div>
-              <span className={`user-state ${attendanceSettings.company_portal_configured ? 'active' : 'inactive'}`}>
-                {attendanceSettings.company_portal_configured ? 'Sudah dibuat' : 'Belum dibuat'}
-              </span>
+          <p className="muted attendance-link-note">Semua pekerja menggunakan satu tautan portal perusahaan. UUID perangkat diterbitkan saat verifikasi nomor pekerja; Admin dan HR Staff dapat mereset UUID melalui daftar pekerja.</p>
+          {user.role === 'admin' && companyPortalLink && (
+            <div className="attendance-link-box company-portal-link-box">
+              <label className="visually-hidden" htmlFor="attendance-company-portal-link">Tautan portal perusahaan</label>
+              <input id="attendance-company-portal-link" readOnly value={companyPortalLink} />
+              <button className="button secondary" type="button" onClick={() => copyToClipboard(companyPortalLink)}>Salin tautan</button>
             </div>
-            {companyPortalLink ? (
-              <div className="attendance-link-box company-portal-link-box">
-                <input aria-label="Tautan portal perusahaan" readOnly value={companyPortalLink} />
-                <button className="button secondary" type="button" onClick={() => copyToClipboard(companyPortalLink)}>Salin tautan</button>
-              </div>
-            ) : attendanceSettings.company_portal_configured ? (
-              <p className="muted attendance-link-note">Tautan hanya ditampilkan setelah dibuat atau dirotasi dan tidak dapat dipulihkan dari server. Admin dapat merotasinya melalui Pengaturan → Pengaturan Presensi.</p>
-            ) : (
-              <p className="muted attendance-link-note">Tautan portal belum dibuat. Admin dapat membuatnya melalui Pengaturan → Pengaturan Presensi.</p>
-            )}
-            <p className="muted attendance-link-note">Bagikan tautan ini secara internal. Pekerja memverifikasi nomor pekerja untuk memperoleh UUID perangkat; Admin dan HR Staff dapat mereset UUID melalui daftar pekerja.</p>
-          </section>
+          )}
           <p className="muted attendance-link-note">Koordinat berasal dari browser perangkat dan tidak membuktikan lokasi secara anti-spoofing.</p>
+          {!attendanceSettings.company_portal_configured && <p className="attendance-salt-warning">Tautan portal perusahaan belum dibuat. Admin dapat membuatnya melalui Pengaturan → Pengaturan Presensi.</p>}
           {attendanceLoading ? <p className="muted">Memuat rekap presensi...</p> : (
             <div className="table-wrap">
               <table className="attendance-table">

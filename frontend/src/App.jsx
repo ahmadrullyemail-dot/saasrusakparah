@@ -1711,10 +1711,10 @@ function WorkspaceApp() {
           attendancePage={attendancePage}
           attendancePageSize={attendancePageSize}
           attendanceSettings={attendanceSettings}
+          companyPortalLink={companyPortalLink}
           attendanceStatusDrafts={attendanceStatusDrafts}
           attendanceSearch={attendanceSearch}
           busy={busy}
-          companyPortalLink={companyPortalLink}
           copyToClipboard={copyToClipboard}
           decideAttendanceRequest={decideAttendanceRequest}
           decideLeaveRequest={decideLeaveRequest}
