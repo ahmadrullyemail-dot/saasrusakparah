@@ -835,7 +835,7 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
             s.token_salt, l.token_hash,
             s.anti_mock_location_enabled,
             DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS attendance_date,
-            a.status, a.attendance_type, a.approval_status, a.approval_note,
+            a.id AS attendance_record_id, a.status, a.attendance_type, a.approval_status, a.approval_note,
             a.check_in_time, a.check_out_time, a.location_id,
             a.check_in_latitude, a.check_in_longitude,
             a.check_out_latitude, a.check_out_longitude,
@@ -890,6 +890,8 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
     data: {
       ...attendanceData,
       worker_id: String(attendanceData.worker_id),
+      attendance_record_id: attendanceData.attendance_record_id == null ? null : String(attendanceData.attendance_record_id),
+      has_attendance_record: attendanceData.attendance_record_id != null,
       location_id: attendanceData.location_id == null ? null : String(attendanceData.location_id),
       has_evidence: Boolean(attendanceData.has_evidence),
       anti_mock_location_enabled: Boolean(attendanceData.anti_mock_location_enabled),
@@ -899,6 +901,85 @@ app.get('/api/public/attendance', asyncRoute(async (req, res) => {
       recent_attendance_month: monthRange.month,
     },
   });
+}));
+
+app.delete('/api/public/attendance/today', asyncRoute(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  const { worker_id: workerId, token } = req.body || {};
+  if (!validWorkerId(workerId) || !validAttendanceToken(token)) {
+    return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+  }
+  const connection = await pool.getConnection();
+  let deletedRecord;
+  let tenantId;
+  try {
+    await connection.beginTransaction();
+    const [workers] = await connection.execute(
+      `SELECT w.id AS worker_id, w.tenant_id, w.full_name, s.token_salt, l.token_hash
+         FROM workers w
+         JOIN tenant_attendance_settings s ON s.tenant_id = w.tenant_id
+         JOIN worker_attendance_links l ON l.worker_id = w.id AND l.tenant_id = w.tenant_id
+        WHERE w.id = ? AND l.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL
+        FOR UPDATE`,
+      [workerId]
+    );
+    const worker = workers[0];
+    if (!worker || !attendanceTokenMatches(
+      token,
+      createAttendanceToken(worker.tenant_id, worker.worker_id, worker.token_salt),
+      worker.token_hash
+    )) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Attendance link is invalid or inactive' });
+    }
+    tenantId = String(worker.tenant_id);
+    const [records] = await connection.execute(
+      `SELECT id, attendance_date, status, attendance_type
+         FROM attendance
+        WHERE tenant_id = ? AND worker_id = ? AND attendance_date = CURDATE() AND deleted_at IS NULL
+        FOR UPDATE`,
+      [worker.tenant_id, worker.worker_id]
+    );
+    const record = records[0];
+    if (!record) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'No attendance activity exists for today' });
+    }
+    deletedRecord = {
+      id: String(record.id),
+      status: record.status,
+      attendance_type: record.attendance_type,
+    };
+    await connection.execute(
+      `DELETE FROM attendance
+        WHERE id = ? AND tenant_id = ? AND worker_id = ?
+          AND attendance_date = CURDATE() AND deleted_at IS NULL`,
+      [record.id, worker.tenant_id, worker.worker_id]
+    );
+    await connection.execute(
+      `INSERT INTO audit_events
+         (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
+       VALUES (?, NULL, ?, 'worker', 'delete', 'attendance', ?, ?)`,
+      [
+        worker.tenant_id,
+        worker.full_name,
+        `${worker.worker_id}:${String(record.attendance_date).slice(0, 10)}`,
+        `Pekerja menghapus aktivitas presensi hari ini (${record.attendance_type || record.status}).`,
+      ]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+  publishTenantEvent(tenantId, 'attendance_updated', { action: 'worker_delete_today' });
+  publishTenantEvent(tenantId, 'dashboard_updated', { action: 'worker_delete_today' });
+  publishTenantEvent(tenantId, 'approval_updated', { action: 'worker_delete_today' });
+  publishTenantEvent(tenantId, 'history_updated', { action: 'worker_delete_today' });
+  res.json({ data: { deleted: true, ...deletedRecord } });
 }));
 
 app.get('/api/public/worker-profile/photo', asyncRoute(async (req, res) => {
@@ -1276,7 +1357,8 @@ app.post('/api/public/attendance', attendanceEvidenceUpload.single('evidence'), 
     }
 
     const [updatedRows] = await connection.execute(
-      `SELECT DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date,
+      `SELECT id AS attendance_record_id,
+              DATE_FORMAT(attendance_date, '%Y-%m-%d') AS attendance_date,
               check_in_time, check_out_time, status, attendance_type, approval_status, approval_note,
               location_id, IF(evidence_data IS NULL, 0, 1) AS has_evidence,
               check_in_latitude, check_in_longitude,
@@ -1316,6 +1398,8 @@ app.post('/api/public/attendance', attendanceEvidenceUpload.single('evidence'), 
     res.json({
       data: {
         ...updatedRows[0],
+        attendance_record_id: String(updatedRows[0].attendance_record_id),
+        has_attendance_record: true,
         location_id: updatedRows[0].location_id == null ? null : String(updatedRows[0].location_id),
         has_evidence: Boolean(updatedRows[0].has_evidence),
       },

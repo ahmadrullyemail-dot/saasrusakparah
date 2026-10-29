@@ -252,9 +252,16 @@ function TimerPanel({
   onConfirm,
   onCancel,
   onRetryLocation,
+  onDeleteToday,
+  deletingToday,
 }) {
   const hasCheckIn = Boolean(attendance.check_in_time);
   const hasCheckOut = Boolean(attendance.check_out_time);
+  const [confirmDeleteToday, setConfirmDeleteToday] = useState(false);
+  const hasTodayActivity = Boolean(attendance.has_attendance_record
+    || attendance.attendance_record_id
+    || hasCheckIn
+    || hasCheckOut);
   const isDinas = action === 'check_out'
     ? attendance.attendance_type === 'dinas'
     : activity === 'dinas';
@@ -298,6 +305,18 @@ function TimerPanel({
             <p className="eyebrow">AKTIVITAS HARI INI</p>
             <h2 id="attendance-log-title">Log presensi</h2>
           </div>
+          {hasTodayActivity && (
+            <button
+              className="attendance-delete-today-button"
+              type="button"
+              disabled={busy || deletingToday || Boolean(confirmation)}
+              onClick={() => setConfirmDeleteToday(true)}
+              aria-label="Hapus data aktivitas hari ini"
+            >
+              <Icon name="trash" size={15} />
+              <span>Hapus hari ini</span>
+            </button>
+          )}
           {attendance.approval_status === 'pending' && (
             <div className="attendance-pending-notice" role="status">
               Pengajuan {statusText(attendance.status, hasCheckIn)} sedang menunggu persetujuan HR.
@@ -313,11 +332,23 @@ function TimerPanel({
             {statusText(attendance.status, hasCheckIn)}
           </span>
         </div>
-        {!hasCheckIn && !hasCheckOut ? (
+        {!hasTodayActivity ? (
           <div className="attendance-empty-log">
             <span className="attendance-empty-icon"><NavigationIcon name="history" /></span>
             <span>Belum Ada Presensi Hari Ini</span>
             <small>Clock In untuk mencatat kehadiranmu.</small>
+          </div>
+        ) : !hasCheckIn && !hasCheckOut ? (
+          <div className="attendance-record-summary">
+            <Icon name={attendance.approval_status === 'pending' ? 'clock' : 'checkCircle'} size={18} />
+            <div>
+              <strong>{statusText(attendance.status, false)}</strong>
+              <small>{attendance.approval_status === 'pending'
+                ? 'Pengajuan menunggu persetujuan HR'
+                : attendance.approval_status === 'rejected'
+                  ? 'Pengajuan ditolak'
+                  : 'Status tercatat untuk hari ini'}</small>
+            </div>
           </div>
         ) : (
           <div className="attendance-timeline">
@@ -465,6 +496,50 @@ function TimerPanel({
           </section>
         </div>
       )}
+      {confirmDeleteToday && (
+        <div
+          className="attendance-delete-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !deletingToday) setConfirmDeleteToday(false);
+          }}
+        >
+          <section
+            className="attendance-delete-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="attendance-delete-title"
+          >
+            <span className="attendance-delete-modal-icon"><Icon name="trash" size={21} /></span>
+            <p className="eyebrow">AKTIVITAS HARI INI</p>
+            <h2 id="attendance-delete-title">Hapus catatan presensi?</h2>
+            <p>Apakah Anda yakin ingin menghapus catatan aktivitas hari ini? Data presensi hari sebelumnya tidak dapat dihapus dari portal pekerja.</p>
+            {error && <div className="attendance-feedback error" role="alert">{error}</div>}
+            <div className="attendance-delete-actions">
+              <button
+                className="button secondary"
+                type="button"
+                disabled={deletingToday}
+                onClick={() => setConfirmDeleteToday(false)}
+              >
+                Batal
+              </button>
+              <button
+                className="button danger"
+                type="button"
+                disabled={deletingToday}
+                onClick={async () => {
+                  const deleted = await onDeleteToday();
+                  if (deleted) setConfirmDeleteToday(false);
+                }}
+              >
+                {deletingToday
+                  ? <><span className="attendance-spinner" aria-hidden="true" /> Menghapus...</>
+                  : <><Icon name="trash" size={15} /> Hapus aktivitas</>}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -510,6 +585,7 @@ export default function Presensi() {
   const [attendance, setAttendance] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [deletingToday, setDeletingToday] = useState(false);
   const [locationChecking, setLocationChecking] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
   const [error, setError] = useState('');
@@ -539,6 +615,7 @@ export default function Presensi() {
   const actionLockRef = useRef(false);
   const confirmationSubmitLockRef = useRef(false);
   const leaveSubmitLockRef = useRef(false);
+  const deleteTodayLockRef = useRef(false);
   const phoneDirtyRef = useRef(false);
   const [{ token, workerId }] = useState(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -662,6 +739,47 @@ export default function Presensi() {
       setProfilePhotoError(requestError.message);
     } finally {
       setProfilePhotoBusy(false);
+    }
+  }
+
+  async function deleteTodayAttendance() {
+    if (deleteTodayLockRef.current || deletingToday) return false;
+    deleteTodayLockRef.current = true;
+    setDeletingToday(true);
+    setError('');
+    setNotice('');
+    try {
+      await publicAttendanceRequest('/today', {
+        method: 'DELETE',
+        body: JSON.stringify({ worker_id: workerId, token }),
+      });
+      setAttendance((current) => ({
+        ...current,
+        attendance_record_id: null,
+        has_attendance_record: false,
+        status: null,
+        attendance_type: null,
+        approval_status: null,
+        approval_note: null,
+        check_in_time: null,
+        check_out_time: null,
+        check_in_latitude: null,
+        check_in_longitude: null,
+        check_out_latitude: null,
+        check_out_longitude: null,
+        location_id: null,
+        has_evidence: false,
+        recent_attendance: (current.recent_attendance || [])
+          .filter((record) => record.attendance_date !== current.attendance_date),
+      }));
+      setNotice('Catatan aktivitas hari ini berhasil dihapus.');
+      return true;
+    } catch (requestError) {
+      setError(requestError.message);
+      return false;
+    } finally {
+      deleteTodayLockRef.current = false;
+      setDeletingToday(false);
     }
   }
 
@@ -968,6 +1086,8 @@ export default function Presensi() {
                   onConfirm={confirmAttendanceAction}
                   onCancel={closeActionConfirmation}
                   onRetryLocation={() => checkConfirmationLocation(confirmation)}
+                  onDeleteToday={deleteTodayAttendance}
+                  deletingToday={deletingToday}
                 />
               )}
               {section === 'history' && (
