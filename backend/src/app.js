@@ -547,21 +547,21 @@ function validAttendanceToken(value) {
 
 function hashAttendanceToken(token) {
   if (!validAttendanceToken(token)) return null;
-  return crypto.createHash('sha256').update(token, 'utf8').digest();
+  return crypto.createHash('sha256').update(token.toLowerCase(), 'utf8').digest();
+}
+
+function findMatchingPortalSession(sessions, clientUuid) {
+  const suppliedHash = hashAttendanceToken(clientUuid);
+  if (!suppliedHash) return null;
+  return sessions.find((session) =>
+    Buffer.isBuffer(session.token_hash)
+    && session.token_hash.length === suppliedHash.length
+    && crypto.timingSafeEqual(session.token_hash, suppliedHash)) || null;
 }
 
 function hashCompanyPortalToken(token) {
   if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
   return crypto.createHash('sha256').update(token, 'ascii').digest();
-}
-
-function validPortalEnrollmentCode(value) {
-  return typeof value === 'string' && /^[A-F0-9]{16}$/.test(value);
-}
-
-function hashPortalEnrollmentCode(code) {
-  if (!validPortalEnrollmentCode(code)) return null;
-  return crypto.createHash('sha256').update(code, 'ascii').digest();
 }
 
 async function findWorkerForAttendanceToken(workerId, token, connection = pool, lock = false) {
@@ -683,58 +683,86 @@ function evaluateEligibility(worker, documents, today = new Date().toISOString()
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-app.post('/api/public/portal/enroll', asyncRoute(async (req, res) => {
+app.post('/api/public/portal/verify', asyncRoute(async (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
-  if (!takeAuthRateLimit(`portal-enroll:${req.ip || req.socket.remoteAddress || 'unknown'}`)) {
-    return res.status(429).json({ error: 'Pendaftaran terlalu sering dicoba. Coba lagi nanti.' });
+  if (!takeAuthRateLimit(`portal-verify:${req.ip || req.socket.remoteAddress || 'unknown'}`)) {
+    return res.status(429).json({ error: 'Verifikasi terlalu sering dicoba. Coba lagi nanti.' });
   }
-  const { company_token: companyToken, worker_number: workerNumber, enrollment_code: enrollmentCode } = req.body || {};
-  if (typeof workerNumber !== 'string' || !validWorkerNumber(workerNumber)
-    || !validPortalEnrollmentCode(enrollmentCode)
-    || typeof companyToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(companyToken)) {
-    return res.status(400).json({ error: 'Masukkan nomor pekerja dan kode enrollment yang valid.' });
+  const { company_token: companyToken, worker_number: workerNumber, client_uuid: clientUuidInput } = req.body || {};
+  if (typeof companyToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(companyToken)
+    || typeof workerNumber !== 'string' || !validWorkerNumber(workerNumber)
+    || (clientUuidInput != null && clientUuidInput !== '' && !validAttendanceToken(clientUuidInput))) {
+    return res.status(400).json({ error: 'Masukkan nomor pekerja dan UUID perangkat yang valid.' });
   }
   const connection = await pool.getConnection();
-  let sessionToken;
-  let workerId;
+  let responseData;
   try {
     await connection.beginTransaction();
-    const [rows] = await connection.execute(
-      `SELECT w.id, w.tenant_id, w.full_name
+    const [workers] = await connection.execute(
+      `SELECT w.id AS worker_id, w.tenant_id, w.full_name
          FROM tenant_attendance_settings settings
-         JOIN worker_portal_enrollment_codes codes
-           ON codes.tenant_id = settings.tenant_id
-         JOIN workers w ON w.id = codes.worker_id AND w.tenant_id = codes.tenant_id
+         JOIN workers w ON w.tenant_id = settings.tenant_id
         WHERE settings.company_portal_token_hash = ?
-          AND codes.code_hash = ? AND codes.used_at IS NULL
-          AND codes.expires_at > CURRENT_TIMESTAMP
-          AND LOWER(w.worker_number) = LOWER(?) AND w.status = 'active' AND w.deleted_at IS NULL
-        LIMIT 1 FOR UPDATE`,
-      [hashCompanyPortalToken(companyToken), hashPortalEnrollmentCode(enrollmentCode), workerNumber.trim()]
+          AND LOWER(w.worker_number) = LOWER(?)
+          AND w.status = 'active' AND w.deleted_at IS NULL
+        LIMIT 2 FOR UPDATE`,
+      [hashCompanyPortalToken(companyToken), workerNumber.trim()]
     );
-    if (!rows[0]) {
+    if (workers.length > 1) {
       await connection.rollback();
-      return res.status(404).json({ error: 'Nomor pekerja atau kode enrollment tidak valid, kedaluwarsa, atau sudah digunakan.' });
+      return res.status(409).json({ error: 'Nomor pekerja duplikat pada pekerja aktif. Hubungi Admin atau HR Staff.' });
     }
-    workerId = String(rows[0].id);
-    sessionToken = crypto.randomUUID();
-    await connection.execute(
-      `UPDATE worker_portal_enrollment_codes
-          SET used_at = CURRENT_TIMESTAMP
-        WHERE code_hash = ? AND used_at IS NULL`,
-      [hashPortalEnrollmentCode(enrollmentCode)]
+    const worker = workers[0];
+    if (!worker) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Nomor pekerja tidak ditemukan atau pekerja tidak aktif.' });
+    }
+
+    const [sessions] = await connection.execute(
+      `SELECT id, token_hash FROM worker_portal_sessions
+        WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL
+        ORDER BY id DESC FOR UPDATE`,
+      [worker.tenant_id, worker.worker_id]
     );
-    await connection.execute(
-      `INSERT INTO worker_portal_sessions (tenant_id, worker_id, token_hash)
-       VALUES (?, ?, ?)`,
-      [rows[0].tenant_id, rows[0].id, hashAttendanceToken(sessionToken)]
-    );
-    await connection.execute(
-      `INSERT INTO audit_events
-         (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
-       VALUES (?, NULL, ?, 'worker', 'create', 'worker_portal_session', ?, 'Perangkat pekerja didaftarkan ke portal presensi.')`,
-      [rows[0].tenant_id, rows[0].full_name, workerId]
-    );
+    const matchingSession = findMatchingPortalSession(sessions, clientUuidInput);
+
+    if (sessions.length && !matchingSession) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'UUID perangkat tidak cocok. Minta Admin atau HR Staff mereset UUID jika perangkat ini perlu didaftarkan ulang.',
+        code: 'PORTAL_UUID_MISMATCH',
+      });
+    }
+
+    if (matchingSession) {
+      await connection.execute(
+        'UPDATE worker_portal_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [matchingSession.id]
+      );
+      responseData = {
+        worker_id: String(worker.worker_id),
+        client_uuid: clientUuidInput.toLowerCase(),
+        created: false,
+      };
+    } else {
+      const newClientUuid = crypto.randomUUID();
+      await connection.execute(
+        `INSERT INTO worker_portal_sessions (tenant_id, worker_id, token_hash, last_seen_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+        [worker.tenant_id, worker.worker_id, hashAttendanceToken(newClientUuid)]
+      );
+      await connection.execute(
+        `INSERT INTO audit_events
+           (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
+         VALUES (?, NULL, ?, 'worker', 'create', 'worker_portal_session', ?, 'UUID perangkat portal diterbitkan melalui verifikasi nomor pekerja.')`,
+        [worker.tenant_id, worker.full_name, String(worker.worker_id)]
+      );
+      responseData = {
+        worker_id: String(worker.worker_id),
+        client_uuid: newClientUuid,
+        created: true,
+      };
+    }
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -742,35 +770,7 @@ app.post('/api/public/portal/enroll', asyncRoute(async (req, res) => {
   } finally {
     connection.release();
   }
-  res.status(201).json({ data: { worker_id: workerId, session_token: sessionToken } });
-}));
-
-app.post('/api/public/portal/verify', asyncRoute(async (req, res) => {
-  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
-  if (!takeAuthRateLimit(`portal-verify:${req.ip || req.socket.remoteAddress || 'unknown'}`)) {
-    return res.status(429).json({ error: 'Verifikasi terlalu sering dicoba. Coba lagi nanti.' });
-  }
-  const { company_token: companyToken, session_token: sessionToken } = req.body || {};
-  if (typeof companyToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(companyToken)
-    || !validAttendanceToken(sessionToken)) {
-    return res.status(404).json({ error: 'Sesi portal tidak valid atau telah dicabut.' });
-  }
-  const [rows] = await pool.execute(
-    `SELECT w.id AS worker_id, w.tenant_id, ps.id AS session_id
-       FROM tenant_attendance_settings settings
-       JOIN worker_portal_sessions ps ON ps.tenant_id = settings.tenant_id
-       JOIN workers w ON w.id = ps.worker_id AND w.tenant_id = ps.tenant_id
-      WHERE settings.company_portal_token_hash = ? AND ps.token_hash = ?
-        AND ps.revoked_at IS NULL AND w.status = 'active' AND w.deleted_at IS NULL
-      LIMIT 1`,
-    [hashCompanyPortalToken(companyToken), hashAttendanceToken(sessionToken)]
-  );
-  if (!rows[0]) return res.status(404).json({ error: 'Sesi portal tidak valid atau telah dicabut.' });
-  await pool.execute(
-    'UPDATE worker_portal_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [rows[0].session_id]
-  );
-  res.json({ data: { worker_id: String(rows[0].worker_id) } });
+  res.json({ data: responseData });
 }));
 
 app.post('/api/leaves', leaveAttachmentUpload.single('attachment'), asyncRoute(async (req, res) => {
@@ -1764,7 +1764,7 @@ app.use('/api', (req, res, next) => {
       publishTenantEvent(req.auth.tenantId, 'worker_changed', payload);
       publishTenantEvent(req.auth.tenantId, 'dashboard_updated', payload);
       if (path.includes('/documents')) publishTenantEvent(req.auth.tenantId, 'documents_updated', payload);
-      if (path.includes('/portal-enrollment-code') || path.includes('/portal-sessions')) {
+      if (path.includes('/portal-session')) {
         publishTenantEvent(req.auth.tenantId, 'attendance_updated', payload);
       }
     } else if (path.startsWith('/api/attendance')) {
@@ -2127,7 +2127,7 @@ app.post('/api/admin/attendance-settings/company-token', requireAdmin, asyncRout
     await recordAudit(req, {
       action: 'update',
       entityType: 'attendance_settings',
-      description: 'Tautan portal perusahaan dibuat atau dirotasi; seluruh sesi perangkat dan kode enrollment dicabut.',
+      description: 'Tautan portal perusahaan dibuat atau dirotasi; sesi perangkat dicabut dan data enrollment legacy dinonaktifkan.',
     }, connection);
     await connection.commit();
   } catch (error) {
@@ -2866,44 +2866,31 @@ app.get('/api/workers', asyncRoute(async (req, res) => {
   res.json({ data });
 }));
 
-app.post('/api/workers/:id/portal-enrollment-code', requireManager, asyncRoute(async (req, res) => {
+app.post('/api/workers/:id/portal-session/reset', requireManager, asyncRoute(async (req, res) => {
+  if (!validWorkerId(req.params.id)) return res.status(400).json({ error: 'Invalid worker ID' });
   const connection = await pool.getConnection();
-  const enrollmentCode = crypto.randomBytes(8).toString('hex').toUpperCase();
   try {
     await connection.beginTransaction();
     const worker = await getWorker(req.auth.tenantId, req.params.id, connection, true);
-    if (!worker || worker.status !== 'active') {
+    if (!worker || worker.status !== 'active' || !worker.worker_number) {
       await connection.rollback();
-      return res.status(404).json({ error: 'Active worker not found' });
+      return res.status(404).json({ error: 'Pekerja aktif dengan nomor pekerja diperlukan untuk mereset UUID portal.' });
     }
-    if (!worker.worker_number) {
-      await connection.rollback();
-      return res.status(409).json({ error: 'Tetapkan nomor pekerja sebelum menerbitkan kode enrollment portal.' });
-    }
-    const [portalSettings] = await connection.execute(
-      'SELECT company_portal_token_hash FROM tenant_attendance_settings WHERE tenant_id = ? FOR UPDATE',
-      [req.auth.tenantId]
+    await connection.execute(
+      `UPDATE worker_portal_sessions SET revoked_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
+      [req.auth.tenantId, worker.id]
     );
-    if (!portalSettings[0]?.company_portal_token_hash) {
-      await connection.rollback();
-      return res.status(409).json({ error: 'Admin harus membuat tautan portal perusahaan terlebih dahulu.' });
-    }
     await connection.execute(
       `UPDATE worker_portal_enrollment_codes SET used_at = CURRENT_TIMESTAMP
         WHERE tenant_id = ? AND worker_id = ? AND used_at IS NULL`,
       [req.auth.tenantId, worker.id]
     );
-    await connection.execute(
-      `INSERT INTO worker_portal_enrollment_codes
-         (tenant_id, worker_id, code_hash, created_by, expires_at)
-       VALUES (?, ?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 30 MINUTE))`,
-      [req.auth.tenantId, worker.id, hashPortalEnrollmentCode(enrollmentCode), req.auth.userId]
-    );
     await recordAudit(req, {
-      action: 'create',
-      entityType: 'portal_enrollment_code',
+      action: 'update',
+      entityType: 'worker_portal_session',
       entityId: worker.id,
-      description: `Kode enrollment portal untuk pekerja "${worker.full_name}" diterbitkan dan berlaku 30 menit.`,
+      description: `UUID portal pekerja "${worker.full_name}" direset oleh ${req.auth.role}.`,
     }, connection);
     await connection.commit();
   } catch (error) {
@@ -2912,29 +2899,7 @@ app.post('/api/workers/:id/portal-enrollment-code', requireManager, asyncRoute(a
   } finally {
     connection.release();
   }
-  res.status(201).json({
-    data: {
-      worker_id: String(req.params.id),
-      enrollment_code: enrollmentCode,
-      expires_in_minutes: 30,
-    },
-  });
-}));
-
-app.delete('/api/workers/:id/portal-sessions', requireAdmin, asyncRoute(async (req, res) => {
-  const [result] = await pool.execute(
-    `UPDATE worker_portal_sessions SET revoked_at = CURRENT_TIMESTAMP
-      WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
-    [req.auth.tenantId, req.params.id]
-  );
-  if (!result.affectedRows) return res.status(404).json({ error: 'Active portal sessions not found' });
-  await recordAudit(req, {
-    action: 'delete',
-    entityType: 'worker_portal_sessions',
-    entityId: req.params.id,
-    description: 'Sesi portal perangkat pekerja dicabut.',
-  });
-  res.status(204).end();
+  res.json({ data: { worker_id: String(req.params.id), reset: true } });
 }));
 
 app.get('/api/departments', asyncRoute(async (req, res) => {
@@ -3794,8 +3759,7 @@ module.exports = {
   MAX_PROFILE_PHOTO_BYTES,
   validAttendanceToken,
   hashAttendanceToken,
-  validPortalEnrollmentCode,
-  hashPortalEnrollmentCode,
+  findMatchingPortalSession,
   validWorkerId,
   validWorkerNumber,
   normalizeWorkerNumber,

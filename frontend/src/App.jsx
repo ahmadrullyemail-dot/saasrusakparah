@@ -26,7 +26,6 @@ function WorkspaceApp() {
   const [attendanceMonth, setAttendanceMonth] = useState(localDateString().slice(0, 7));
   const [attendanceData, setAttendanceData] = useState({ attendance_date: '', records: [] });
   const [monthlyAttendance, setMonthlyAttendance] = useState({ month: '', days_in_month: 0, records: [] });
-  const [portalEnrollmentCodes, setPortalEnrollmentCodes] = useState({});
   const [companyPortalLink, setCompanyPortalLink] = useState('');
   const [attendanceStatusDrafts, setAttendanceStatusDrafts] = useState({});
   const [attendanceLoading, setAttendanceLoading] = useState(false);
@@ -327,19 +326,23 @@ function WorkspaceApp() {
     setDocumentTypes(await api('/document-types'));
   }
 
-  async function createPortalEnrollmentCode(workerId) {
+  async function resetWorkerPortalSession(workerId) {
+    if (!window.confirm('Reset UUID portal pekerja ini? UUID aktif akan dicabut dan perangkat akan menerima UUID baru saat pekerja masuk berikutnya.')) {
+      return false;
+    }
     setError('');
     setNotice('');
     setBusy(true);
     try {
-      const { enrollment_code: code, expires_in_minutes: expiresInMinutes } = await api(
-        `/workers/${workerId}/portal-enrollment-code`,
+      await api(
+        `/workers/${workerId}/portal-session/reset`,
         { method: 'POST' }
       );
-      setPortalEnrollmentCodes((current) => ({ ...current, [workerId]: code }));
-      setNotice(`Kode enrollment berlaku ${expiresInMinutes} menit. Berikan kode ini secara pribadi kepada pekerja.`);
+      setNotice('UUID portal berhasil direset. UUID baru akan dibuat saat pekerja memverifikasi nomor pekerjanya.');
+      return true;
     } catch (requestError) {
       showError(requestError);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -358,8 +361,7 @@ function WorkspaceApp() {
       const companyPortalLink = `${window.location.origin}/portal?company_token=${encodeURIComponent(companyToken)}`;
       setAttendanceSettings((current) => ({ ...current, ...updatedSettings }));
       setCompanyPortalLink(companyPortalLink);
-      setPortalEnrollmentCodes({});
-      setNotice('Tautan portal perusahaan berhasil dibuat. Bagikan tautan; kode enrollment pekerja harus dikirim terpisah.');
+      setNotice('Tautan portal perusahaan berhasil dibuat. Bagikan tautan tersebut kepada pekerja untuk verifikasi nomor pekerja.');
       return true;
     } catch (requestError) {
       showError(requestError);
@@ -1696,6 +1698,7 @@ function WorkspaceApp() {
           workerImportResult={workerImportResult}
           workerQuotaFull={workerQuotaFull}
           workerSearch={workerSearch}
+          resetWorkerPortalSession={resetWorkerPortalSession}
           workers={workers}
         />
 
@@ -1703,7 +1706,6 @@ function WorkspaceApp() {
           activeTab={activeTab}
           attendanceDate={attendanceDate}
           attendanceData={attendanceData}
-          portalEnrollmentCodes={portalEnrollmentCodes}
           attendanceLoading={attendanceLoading}
           attendanceMonth={attendanceMonth}
           attendancePage={attendancePage}
@@ -1712,8 +1714,6 @@ function WorkspaceApp() {
           attendanceStatusDrafts={attendanceStatusDrafts}
           attendanceSearch={attendanceSearch}
           busy={busy}
-          createPortalEnrollmentCode={createPortalEnrollmentCode}
-          copyToClipboard={copyToClipboard}
           decideAttendanceRequest={decideAttendanceRequest}
           decideLeaveRequest={decideLeaveRequest}
           openLeaveRejection={openLeaveRejection}
@@ -1728,6 +1728,7 @@ function WorkspaceApp() {
           pendingLeaveRequestsLoading={pendingLeaveRequestsLoading}
           reviewingAttendance={reviewingAttendance}
           saveAttendanceStatus={saveAttendanceStatus}
+          resetWorkerPortalSession={resetWorkerPortalSession}
           selectMatrixAttendanceDate={selectMatrixAttendanceDate}
           setAttendanceDate={setAttendanceDate}
           setAttendanceMonth={setAttendanceMonth}

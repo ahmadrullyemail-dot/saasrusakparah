@@ -1,7 +1,9 @@
 import { StatusBadge } from './StatCard.jsx';
 import { Icon } from './Icon.jsx';
 
-export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkbook, filter, handleImportWorkers, openEditWorker, selectedId, setFilter, setSelectedId, setWorkerSearch, showError, subscription, user, visibleWorkers, workerImportInputRef, workerImportResult, workerQuotaFull, workerSearch, workers }) {
+export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkbook, filter, handleImportWorkers, openEditWorker, resetWorkerPortalSession, selectedId, setFilter, setSelectedId, setWorkerSearch, showError, subscription, user, visibleWorkers, workerImportInputRef, workerImportResult, workerQuotaFull, workerSearch, workers }) {
+  const canManagePortalSessions = user.role === 'admin' || user.role === 'hr_manager';
+  const hasActions = canManagePortalSessions;
   return (
 <section
           className="workspace-grid worker-workspace"
@@ -110,7 +112,7 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Nama pekerja</th><th>Nomor pekerja</th><th>Posisi</th><th>Status</th><th>Kelayakan</th>{user.role === 'admin' && <th>Aksi</th>}</tr></thead>
+                <thead><tr><th>Nama pekerja</th><th>Nomor pekerja</th><th>Posisi</th><th>Status</th><th>Kelayakan</th>{hasActions && <th>Aksi</th>}</tr></thead>
                 <tbody>
                   {visibleWorkers.map((worker) => (
                     <tr key={worker.id} className={selectedId === worker.id ? 'selected-row' : ''}>
@@ -119,18 +121,33 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                       <td className="uppercase-text">{worker.position}</td>
                       <td><StatusBadge status={worker.status} />{worker.scheduled_inactive_date && <small className="scheduled-inactive-note">Nonaktif mulai {worker.scheduled_inactive_date.slice(0, 10)}</small>}</td>
                       <td><span className={`readiness ${worker.eligibility?.eligible ? 'ready' : 'needs-work'}`}>{worker.eligibility?.eligible ? 'Memenuhi syarat' : 'Perlu dokumen'}</span></td>
-                      {user.role === 'admin' && (
+                      {hasActions && (
                         <td>
                           <div className="user-actions">
-                            <button className="button secondary small-action" type="button" disabled={busy} onClick={() => openEditWorker(worker)}><Icon name="pencil" size={15} /> Edit</button>
-                            <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveWorker(worker.id)}><Icon name="archive" size={15} /> Arsipkan</button>
+                            {user.role === 'admin' && (
+                              <>
+                                <button className="button secondary small-action" type="button" disabled={busy} onClick={() => openEditWorker(worker)}><Icon name="pencil" size={15} /> Edit</button>
+                                <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveWorker(worker.id)}><Icon name="archive" size={15} /> Arsipkan</button>
+                              </>
+                            )}
+                            {canManagePortalSessions && (
+                              <button
+                                className="button secondary small-action"
+                                type="button"
+                                disabled={busy || worker.status !== 'active' || !worker.worker_number}
+                                onClick={() => resetWorkerPortalSession(worker.id)}
+                                title={!worker.worker_number ? 'Tetapkan nomor pekerja terlebih dahulu' : undefined}
+                              >
+                                <Icon name="refresh" size={15} /> Reset UUID
+                              </button>
+                            )}
                           </div>
                         </td>
                       )}
                     </tr>
                   ))}
                   {!visibleWorkers.length && (
-                    <tr><td colSpan={user.role === 'admin' ? 6 : 5} className="empty-cell">
+                    <tr><td colSpan={hasActions ? 6 : 5} className="empty-cell">
                       {workers.length ? 'Tidak ada pekerja yang cocok dengan filter pencarian.' : 'Belum ada data pekerja. Gunakan tombol Tambah Pekerja untuk memulai.'}
                     </td></tr>
                   )}

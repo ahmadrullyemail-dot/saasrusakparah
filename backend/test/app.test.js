@@ -36,8 +36,7 @@ const {
   MAX_PROFILE_PHOTO_BYTES,
   validAttendanceToken,
   hashAttendanceToken,
-  validPortalEnrollmentCode,
-  hashPortalEnrollmentCode,
+  findMatchingPortalSession,
   validWorkerId,
   validWorkerNumber,
   normalizeWorkerNumber,
@@ -344,19 +343,20 @@ test('profile photo storage stays below legacy MariaDB packet limits', () => {
   assert.ok(MAX_PROFILE_PHOTO_BYTES < 1024 * 1024);
 });
 
-test('worker portal sessions use UUIDv4 tokens and enrollment codes are stored as hashes', () => {
+test('worker portal sessions use UUIDv4 tokens stored as hashes', () => {
   const sessionToken = '123e4567-e89b-42d3-a456-426614174000';
-  const code = 'A1B2C3D4E5F60718';
+  const anotherSessionToken = '123e4567-e89b-42d3-a456-426614174001';
+  const session = { id: 8, token_hash: hashAttendanceToken(sessionToken) };
   assert.equal(validAttendanceToken(sessionToken), true);
   assert.equal(validAttendanceToken('123e4567-e89b-12d3-a456-426614174000'), false);
   assert.equal(validAttendanceToken('not-a-token'), false);
   assert.equal(hashAttendanceToken(sessionToken).length, 32);
+  assert.deepEqual(hashAttendanceToken(sessionToken.toUpperCase()), hashAttendanceToken(sessionToken));
   assert.equal(hashAttendanceToken('invalid'), null);
-  assert.equal(validPortalEnrollmentCode(code), true);
-  assert.equal(validPortalEnrollmentCode('a1b2c3d4e5f60718'), false);
-  assert.equal(validPortalEnrollmentCode('A1B2C3'), false);
-  assert.equal(hashPortalEnrollmentCode(code).length, 32);
-  assert.equal(hashPortalEnrollmentCode('invalid'), null);
+  assert.equal(findMatchingPortalSession([session], sessionToken), session);
+  assert.equal(findMatchingPortalSession([session], sessionToken.toUpperCase()), session);
+  assert.equal(findMatchingPortalSession([session], anotherSessionToken), null);
+  assert.equal(findMatchingPortalSession([session], ''), null);
 });
 
 test('attendance validates worker IDs and geolocation coordinates', () => {

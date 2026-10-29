@@ -600,7 +600,7 @@ export default function Presensi() {
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalError, setPortalError] = useState('');
   const [workerNumberInput, setWorkerNumberInput] = useState('');
-  const [enrollmentCodeInput, setEnrollmentCodeInput] = useState('');
+  const [clientUuidInput, setClientUuidInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [deletingToday, setDeletingToday] = useState(false);
   const [locationChecking, setLocationChecking] = useState(false);
@@ -653,45 +653,27 @@ export default function Presensi() {
   }, []);
 
   useEffect(() => {
-    let active = true;
     if (!companyToken) {
       setPortalError('Tautan portal perusahaan tidak valid. Gunakan tautan resmi dari HR perusahaan.');
       setPortalChecking(false);
       setLoading(false);
-      return () => { active = false; };
+      return;
     }
-    let savedSession = null;
+    let savedSession;
     try {
       savedSession = JSON.parse(window.localStorage.getItem(portalSessionStorageKey) || 'null');
     } catch {
       window.localStorage.removeItem(portalSessionStorageKey);
     }
-    if (!savedSession || typeof savedSession.session_token !== 'string') {
-      if (!companyToken) setPortalError('Sesi perangkat belum terdaftar. Buka tautan portal perusahaan yang diberikan HR.');
-      setPortalChecking(false);
-      setLoading(false);
-      return () => { active = false; };
+    if (savedSession && typeof savedSession === 'object') {
+      if (typeof savedSession.worker_number === 'string') {
+        setWorkerNumberInput(savedSession.worker_number);
+      }
+      const savedUuid = savedSession.client_uuid || savedSession.session_token;
+      if (typeof savedUuid === 'string') setClientUuidInput(savedUuid);
     }
-    publicPortalRequest('verify', {
-      company_token: companyToken,
-      session_token: savedSession.session_token,
-    }).then(({ worker_id: verifiedWorkerId }) => {
-      if (!active) return;
-      setLoading(true);
-      setPortalAuth({
-        companyToken,
-        token: savedSession.session_token,
-        workerId: verifiedWorkerId,
-      });
-      setPortalError('');
-    }).catch(() => {
-      if (!active) return;
-      window.localStorage.removeItem(portalSessionStorageKey);
-      setPortalError('Sesi perangkat tidak berlaku lagi. Daftarkan perangkat kembali menggunakan kode dari HR.');
-    }).finally(() => {
-      if (active) setPortalChecking(false);
-    });
-    return () => { active = false; };
+    setPortalChecking(false);
+    setLoading(false);
   }, [companyToken, portalSessionStorageKey]);
 
   useEffect(() => {
@@ -733,23 +715,26 @@ export default function Presensi() {
     };
   }, [attendanceHistoryMonth, leaveHistoryMonth, section, token, workerId]);
 
-  async function enrollPortalDevice(event) {
+  async function verifyPortalDevice(event) {
     event.preventDefault();
     if (portalBusy) return;
     setPortalBusy(true);
     setPortalError('');
     try {
-      const { worker_id: enrolledWorkerId, session_token: sessionToken } = await publicPortalRequest('enroll', {
+      const { worker_id: verifiedWorkerId, client_uuid: clientUuid } = await publicPortalRequest('verify', {
         company_token: companyToken,
         worker_number: workerNumberInput.trim(),
-        enrollment_code: enrollmentCodeInput.trim().toUpperCase(),
+        client_uuid: clientUuidInput.trim(),
       });
-      const savedSession = { session_token: sessionToken, worker_id: enrolledWorkerId };
+      const savedSession = {
+        client_uuid: clientUuid,
+        worker_number: workerNumberInput.trim(),
+        worker_id: verifiedWorkerId,
+      };
       window.localStorage.setItem(portalSessionStorageKey, JSON.stringify(savedSession));
+      setClientUuidInput(clientUuid);
       setLoading(true);
-      setPortalAuth({ companyToken, token: sessionToken, workerId: enrolledWorkerId });
-      setWorkerNumberInput('');
-      setEnrollmentCodeInput('');
+      setPortalAuth({ companyToken, token: clientUuid, workerId: verifiedWorkerId });
       setPortalError('');
     } catch (requestError) {
       setPortalError(requestError.message);
@@ -1145,12 +1130,12 @@ export default function Presensi() {
         ) : !token || !workerId ? (
           <section className="attendance-state-card attendance-state-error" role="alert">
             <span className="attendance-state-icon"><Icon name="warning" /></span>
-            <h1>{companyToken ? 'Daftarkan perangkat pekerja' : 'Tautan perusahaan tidak valid'}</h1>
+            <h1>{companyToken ? 'Verifikasi akses pekerja' : 'Tautan perusahaan tidak valid'}</h1>
             <p>{companyToken
-              ? 'Masukkan nomor pekerja dan kode enrollment sekali pakai yang diberikan HR untuk menghubungkan perangkat ini.'
+              ? 'Masukkan nomor pekerja. UUID perangkat yang tersimpan di browser akan terisi otomatis; perangkat baru akan menerima UUID setelah nomor pekerja diverifikasi.'
               : portalError || 'Gunakan tautan portal resmi dari HR perusahaan.'}</p>
             {companyToken && (
-              <form className="attendance-enrollment-form" onSubmit={enrollPortalDevice}>
+              <form className="attendance-enrollment-form" onSubmit={verifyPortalDevice}>
                 <label className="attendance-form-field">Nomor pekerja
                   <input
                     value={workerNumberInput}
@@ -1161,15 +1146,14 @@ export default function Presensi() {
                     disabled={portalBusy}
                   />
                 </label>
-                <label className="attendance-form-field">Kode enrollment
+                <label className="attendance-form-field">UUID perangkat
                   <input
-                    value={enrollmentCodeInput}
-                    onChange={(event) => setEnrollmentCodeInput(event.target.value.toUpperCase())}
-                    required
-                    minLength={16}
-                    maxLength={16}
-                    pattern="[A-F0-9]{16}"
-                    autoComplete="one-time-code"
+                    value={clientUuidInput}
+                    onChange={(event) => setClientUuidInput(event.target.value.trim())}
+                    maxLength={36}
+                    pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
+                    autoComplete="off"
+                    placeholder="Otomatis dibuat pada perangkat baru"
                     disabled={portalBusy}
                   />
                 </label>
@@ -1177,9 +1161,9 @@ export default function Presensi() {
                 <button className="button primary full-width" type="submit" disabled={portalBusy}>
                   {portalBusy
                     ? <><span className="attendance-spinner" aria-hidden="true" /> Memverifikasi...</>
-                    : 'Daftarkan perangkat ini'}
+                    : 'Masuk ke portal'}
                 </button>
-                <small className="attendance-muted">Kode hanya dapat digunakan sekali dan kedaluwarsa setelah 30 menit.</small>
+                <small className="attendance-muted">Jika UUID perangkat tidak cocok, minta Admin atau HR Staff mereset UUID portal pekerja.</small>
               </form>
             )}
           </section>

@@ -1,7 +1,7 @@
 import { attendanceMonthLabel, attendanceMonthSummary, attendanceStatusLabel, formatAttendanceTime, formatCoordinate, monthlyAttendanceCode } from '../lib/hrd.js';
 import { Icon } from './Icon.jsx';
 
-export function AttendancePanel({ activeTab, attendanceDate, attendanceData, portalEnrollmentCodes, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, createPortalEnrollmentCode, copyToClipboard, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance }) {
+export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, attendanceStatusDrafts, attendanceSearch, busy, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, resetWorkerPortalSession, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance }) {
   return (
 <section
           className="panel attendance-panel"
@@ -243,7 +243,7 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, por
               />
             </label>
           </div>*/}
-          <p className="muted attendance-link-note">Semua pekerja menggunakan satu tautan portal perusahaan. Untuk enrollment perangkat baru, terbitkan kode sekali pakai dan sampaikan secara pribadi kepada pekerja.</p>
+          <p className="muted attendance-link-note">Semua pekerja menggunakan satu tautan portal perusahaan. UUID perangkat diterbitkan saat verifikasi nomor pekerja; Admin dan HR Staff dapat mereset UUID melalui daftar pekerja.</p>
           <p className="muted attendance-link-note">Koordinat berasal dari browser perangkat dan tidak membuktikan lokasi secara anti-spoofing.</p>
           {!attendanceSettings.company_portal_configured && <p className="attendance-salt-warning">Tautan portal perusahaan belum dibuat. Admin dapat membuatnya melalui Pengaturan → Pengaturan Presensi.</p>}
           {attendanceLoading ? <p className="muted">Memuat rekap presensi...</p> : (
@@ -322,19 +322,18 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, por
                         ) : '—'}
                       </td>
                       <td className="attendance-link-cell">
-                        {user.role !== 'viewer' && attendanceSettings.company_portal_configured && (
-                          <>
-                            <button className="button secondary" type="button" disabled={busy || record.status === 'inactive'} onClick={() => createPortalEnrollmentCode(record.worker_id)}>
-                              {portalEnrollmentCodes[record.worker_id] ? 'Terbitkan kode baru' : 'Buat kode enrollment'}
+                        {(user.role === 'admin' || user.role === 'hr_manager')
+                          && attendanceSettings.company_portal_configured
+                          && (
+                            <button
+                              className="button secondary"
+                              type="button"
+                              disabled={busy}
+                              onClick={() => resetWorkerPortalSession(record.worker_id)}
+                            >
+                              <Icon name="refresh" size={15} /> Reset UUID
                             </button>
-                            {portalEnrollmentCodes[record.worker_id] && (
-                              <div className="attendance-link-box">
-                                <input aria-label={`Kode enrollment ${record.full_name}`} readOnly value={portalEnrollmentCodes[record.worker_id]} />
-                                <button className="button secondary" type="button" onClick={() => copyToClipboard(portalEnrollmentCodes[record.worker_id])}>Salin kode</button>
-                              </div>
-                            )}
-                          </>
-                        )}
+                          )}
                       </td>
                       <td>{user.role === 'admin' && record.attendance_id && <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveAttendance(record.worker_id)}>Arsipkan</button>}</td>
                     </tr>

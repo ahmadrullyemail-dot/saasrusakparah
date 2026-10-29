@@ -268,7 +268,7 @@ export function SettingsPanel({
                 {attendanceSettings.company_portal_configured ? 'Sudah dibuat' : 'Belum dibuat'}
               </span>
             </div>
-            <p className="muted">Satu URL digunakan bersama untuk perusahaan. Tautan baru hanya ditampilkan setelah dibuat; jika hilang, Admin perlu merotasi tautan (yang mencabut sesi perangkat). Setiap perangkat baru tetap memerlukan kode enrollment sekali pakai yang diterbitkan HR/Admin dan diberikan melalui kanal terpisah.</p>
+            <p className="muted">Satu URL digunakan bersama untuk perusahaan. Pekerja memverifikasi nomor pekerja melalui tautan ini; UUID perangkat baru dibuat otomatis dan disimpan di browser. Admin atau HR Staff dapat mereset UUID dari daftar pekerja. Nomor pekerja saja bukan bukti identitas, jadi bagikan tautan hanya melalui kanal internal.</p>
             {companyPortalLink && (
               <div className="attendance-link-box company-portal-link-box">
                 <input aria-label="Tautan portal perusahaan" readOnly value={companyPortalLink} />
@@ -297,7 +297,7 @@ export function SettingsPanel({
             </p>
             {attendanceSettings.updated_at && <p className="settings-footnote">Terakhir dirotasi: {new Date(attendanceSettings.updated_at).toLocaleString('id-ID')}</p>}
             <div className="attendance-salt-warning">
-              Pembuatan/rotasi tautan portal membatalkan seluruh sesi perangkat dan kode enrollment aktif. Pekerja harus membuka tautan baru dan melakukan enrollment kembali.
+              Pembuatan/rotasi tautan portal membatalkan seluruh sesi perangkat. Pekerja harus membuka tautan baru dan memverifikasi nomor pekerja untuk memperoleh UUID perangkat baru.
             </div>
             <button
               className={`button ${attendanceSettings.company_portal_configured ? 'danger' : 'primary'}`}
@@ -424,10 +424,10 @@ export function SettingsPanel({
             </div>
             <p className="confirmation-modal-description" id="attendance-salt-confirm-description">
               {attendanceSaltConfirmStep === 2
-                ? 'Rotasi langsung mencabut seluruh sesi perangkat dan kode enrollment. Untuk melanjutkan, ketik ROTASI TAUTAN persis seperti tertulis.'
+                ? 'Rotasi langsung mencabut seluruh sesi perangkat. Untuk melanjutkan, ketik ROTASI TAUTAN persis seperti tertulis.'
                 : attendanceSettings.company_portal_configured
-                  ? 'Tindakan ini langsung membatalkan tautan perusahaan sebelumnya, semua sesi perangkat, dan kode enrollment yang belum dipakai.'
-                  : 'Tautan perusahaan acak akan dibuat. Kode enrollment tetap diperlukan untuk mendaftarkan perangkat pekerja.'}
+                  ? 'Tindakan ini langsung membatalkan tautan perusahaan sebelumnya dan semua sesi perangkat.'
+                  : 'Tautan perusahaan acak akan dibuat. Pekerja menggunakan nomor pekerja untuk verifikasi awal.'}
             </p>
             {attendanceSaltConfirmStep === 2 && (
               <label className="confirmation-input-label" htmlFor="attendance-salt-confirmation">
