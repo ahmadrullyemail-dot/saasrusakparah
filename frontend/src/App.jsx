@@ -71,6 +71,7 @@ function WorkspaceApp() {
   const [activationWorkerNumber, setActivationWorkerNumber] = useState('');
   const [activationError, setActivationError] = useState('');
   const [renewalDocument, setRenewalDocument] = useState(null);
+  const [renewalStatus, setRenewalStatus] = useState('valid');
   const [renewalBusy, setRenewalBusy] = useState(false);
   const [renewalError, setRenewalError] = useState('');
   const [documentStatus, setDocumentStatus] = useState('pending');
@@ -263,35 +264,6 @@ function WorkspaceApp() {
       setCompanyPortalLink('');
       setCompanyPortalLinkNeedsRotation(false);
       return;
-    }
-
-    async function handleRenewDocument(event) {
-      event.preventDefault();
-      if (!renewalDocument) return;
-      const formData = new FormData(event.currentTarget);
-      setRenewalBusy(true);
-      setRenewalError('');
-      try {
-        await api(
-          `/workers/${encodeURIComponent(renewalDocument.worker_id)}/documents/${encodeURIComponent(renewalDocument.id)}/renew`,
-          { method: 'POST', body: formData }
-        );
-        setRenewalDocument(null);
-        setNotice('Dokumen berhasil diperpanjang dan masa berlaku telah diperbarui.');
-        try {
-          await Promise.all([
-            refreshWorkers(),
-            refreshDashboard(),
-            selectedId ? api(`/workers/${encodeURIComponent(selectedId)}`).then(setSelectedWorker) : Promise.resolve(),
-          ]);
-        } catch (refreshError) {
-          showError(new Error(`Dokumen berhasil diperpanjang, tetapi tampilan gagal diperbarui: ${refreshError.message}`));
-        }
-      } catch (requestError) {
-        setRenewalError(requestError.message || 'Tidak dapat memperpanjang dokumen.');
-      } finally {
-        setRenewalBusy(false);
-      }
     }
 
     let cancelled = false;
@@ -1097,13 +1069,7 @@ function WorkspaceApp() {
     try {
       await api(`/workers/${selectedWorker.id}/documents`, {
         method: 'POST',
-        body: JSON.stringify({
-          type: form.get('type'),
-          status: documentStatus,
-          valid_from: form.get('valid_from') || null,
-          valid_until: form.get('valid_until') || null,
-          target_completion_date: form.get('target_completion_date') || null,
-        }),
+        body: form,
       });
       formElement.reset();
       setDocumentStatus('pending');
@@ -1113,6 +1079,39 @@ function WorkspaceApp() {
       showError(requestError);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleRenewDocument(event) {
+    event.preventDefault();
+    if (!renewalDocument) return;
+    const formData = new FormData(event.currentTarget);
+    setRenewalBusy(true);
+    setRenewalError('');
+    try {
+      await api(
+        `/workers/${encodeURIComponent(renewalDocument.worker_id)}/documents/${encodeURIComponent(renewalDocument.id)}/renew`,
+        { method: 'POST', body: formData }
+      );
+      setRenewalDocument(null);
+      setNotice(renewalStatus === 'pending'
+        ? 'Pembaruan dokumen menunggu pemeriksaan.'
+        : renewalStatus === 'rejected'
+          ? 'Pembaruan dokumen ditolak dan keterangannya tersimpan.'
+          : 'Masa berlaku dokumen berhasil diperbarui.');
+      try {
+        await Promise.all([
+          refreshWorkers(),
+          refreshDashboard(),
+          selectedId ? api(`/workers/${encodeURIComponent(selectedId)}`).then(setSelectedWorker) : Promise.resolve(),
+        ]);
+      } catch (refreshError) {
+        showError(new Error(`Dokumen berhasil diperpanjang, tetapi tampilan gagal diperbarui: ${refreshError.message}`));
+      }
+    } catch (requestError) {
+      setRenewalError(requestError.message || 'Tidak dapat memperpanjang dokumen.');
+    } finally {
+      setRenewalBusy(false);
     }
   }
 
@@ -1296,6 +1295,14 @@ function WorkspaceApp() {
       setActiveTab('documents');
   }
 
+  function openRenewalForm(document) {
+    setRenewalDocument(document);
+    setRenewalStatus(['pending', 'rejected'].includes(document.status) && document.renewed_from_document_id
+      ? document.status
+      : 'valid');
+    setRenewalError('');
+  }
+
   const monthlyWorkerRows = useMemo(() => {
     const grouped = new Map();
     for (const record of monthlyAttendance.records) {
@@ -1417,7 +1424,7 @@ function WorkspaceApp() {
           <div>
             <p className="eyebrow">DASHBOARD HRD</p>
             <h1>Pemantauan siklus pekerja</h1>
-            <p className="muted">Kelola status dan persyaratan dokumen dalam satu ruang kerja.</p>
+            <p className="muted">Kelola status pekerja dan pemantauan dokumen dalam satu ruang kerja.</p>
           </div>
           <div className="topbar-actions">
             <span className={`realtime-status ${realtimeConnected ? 'connected' : ''}`} role="status">
@@ -1532,23 +1539,52 @@ function WorkspaceApp() {
               </p>
               <form className="form-stack" onSubmit={handleRenewDocument}>
                 <label>
-                  Tanggal kedaluwarsa baru
-                  <input type="date" name="valid_until" min={localDateString()} required disabled={renewalBusy} />
+                  Status pembaruan
+                  <select name="status" value={renewalStatus} onChange={(event) => setRenewalStatus(event.target.value)} disabled={renewalBusy}>
+                    <option value="pending">Menunggu pemeriksaan</option>
+                    <option value="valid">Diperpanjang / Valid</option>
+                    <option value="rejected">Ditolak</option>
+                  </select>
                 </label>
+                {renewalStatus === 'pending' && (
+                  <label>
+                    Target selesai
+                    <input type="date" name="target_completion_date" min={localDateString()} required disabled={renewalBusy} />
+                  </label>
+                )}
+                {renewalStatus === 'valid' && (
+                  <div className="date-fields">
+                    <label>
+                      Berlaku mulai
+                      <input type="date" name="valid_from" required disabled={renewalBusy} />
+                    </label>
+                    <label>
+                      Berlaku hingga
+                      <input type="date" name="valid_until" min={localDateString()} required disabled={renewalBusy} />
+                    </label>
+                  </div>
+                )}
                 <label>
-                  Lampiran dokumen baru
+                  Lampiran dokumen (opsional)
                   <input
                     type="file"
                     name="attachment"
                     accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
-                    required
                     disabled={renewalBusy}
                   />
                   <small>Format JPG, PNG, atau PDF; ukuran maksimal 5 MB.</small>
                 </label>
                 <label>
-                  Catatan (opsional)
-                  <textarea name="note" maxLength={500} rows={3} disabled={renewalBusy} placeholder="Contoh: nomor referensi surat atau klinik rujukan" />
+                  {renewalStatus === 'rejected' ? 'Keterangan penolakan' : 'Keterangan (opsional)'}
+                  <textarea
+                    name="note"
+                    maxLength={500}
+                    minLength={renewalStatus === 'rejected' ? 5 : undefined}
+                    rows={3}
+                    required={renewalStatus === 'rejected'}
+                    disabled={renewalBusy}
+                    placeholder={renewalStatus === 'rejected' ? 'Tuliskan alasan penolakan (minimal 5 karakter)' : 'Catatan referensi atau keterangan'}
+                  />
                 </label>
                 {renewalError && <p className="notice error modal-error" role="alert">{renewalError}</p>}
                 <div className="confirmation-modal-actions">
@@ -1686,10 +1722,7 @@ function WorkspaceApp() {
                           <button
                             className="button secondary small-action dashboard-document-renew"
                             type="button"
-                            onClick={() => {
-                              setRenewalError('');
-                              setRenewalDocument(document);
-                            }}
+                            onClick={() => openRenewalForm(document)}
                           >
                             Perpanjang
                           </button>
@@ -1967,8 +2000,8 @@ function WorkspaceApp() {
             ) : (
               <>
                 <div className={`eligibility-banner ${selectedProfileWorker.eligibility.eligible ? 'eligible' : 'ineligible'}`}>
-                  <strong>{selectedProfileWorker.eligibility.eligible ? 'Persyaratan dokumen terpenuhi' : 'Persyaratan dokumen belum terpenuhi'}</strong>
-                  <span>{selectedProfileWorker.eligibility.eligible ? 'HRD dapat mempertimbangkan aktivasi.' : 'Lengkapi dokumen wajib yang masih kurang atau kedaluwarsa.'}</span>
+                  <strong>{selectedProfileWorker.eligibility.eligible ? 'Dokumen terpantau lengkap' : 'Ada dokumen yang belum lengkap'}</strong>
+                  <span>Pemantauan dokumen ini bersifat informatif dan tidak menghalangi aktivasi pekerja.</span>
                 </div>
                 <div className="worker-number-profile">
                   <span>Nomor pekerja</span>
@@ -2010,7 +2043,26 @@ function WorkspaceApp() {
                               </a>
                             )}
                             {document.renewal_note && user.role !== 'viewer' && (
-                              <small className="document-renewal-note">Catatan perpanjangan: {document.renewal_note}</small>
+                              <small className="document-renewal-note">
+                                {document.status === 'rejected' ? 'Keterangan penolakan' : 'Keterangan'}: {document.renewal_note}
+                              </small>
+                            )}
+                            {document.renewed_from_document_id
+                              && !document.superseded_by_document_id
+                              && ['pending', 'rejected'].includes(document.status)
+                              && user.role !== 'viewer' && (
+                                <button
+                                  className="button secondary small-action"
+                                  type="button"
+                                  disabled={renewalBusy}
+                                  onClick={() => openRenewalForm({
+                                    ...document,
+                                    worker_id: selectedProfileWorker.id,
+                                    worker_name: selectedProfileWorker.full_name,
+                                  })}
+                                >
+                                  {document.status === 'pending' ? 'Tindak lanjuti' : 'Perbarui'}
+                                </button>
                             )}
                           </article>
                         );
@@ -2020,7 +2072,7 @@ function WorkspaceApp() {
                 {user.role === 'admin' && <div className="status-controls">
                   {selectedProfileWorker.status === 'offered' && <button className="button secondary" disabled={busy} onClick={() => changeStatus('preactive')}>Pindahkan ke pra-aktif</button>}
                   {['preactive', 'inactive'].includes(selectedProfileWorker.status) && (
-                    <button className="button primary" disabled={busy || !selectedProfileWorker.eligibility.eligible} onClick={() => openActivationDialog(selectedProfileWorker)}>
+                    <button className="button primary" disabled={busy} onClick={() => openActivationDialog(selectedProfileWorker)}>
                       {selectedProfileWorker.status === 'inactive' ? 'Aktifkan kembali' : 'Aktifkan pekerja'}
                     </button>
                   )}
@@ -2068,6 +2120,11 @@ function WorkspaceApp() {
                       <label>Berlaku hingga<input type="date" name="valid_until" /></label>
                     </div>
                   )}
+                  <label>
+                    Lampiran dokumen (opsional)
+                    <input type="file" name="attachment" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" />
+                    <small>JPG, PNG, atau PDF; maksimal 5 MB.</small>
+                  </label>
                   <button className="button primary" disabled={busy || !documentTypes.some((type) => type.is_active || selectedProfileWorker.required_document_types.includes(type.code))}>Simpan dokumen</button>
                   <small>Hasil medis rinci dan catatan bebas tidak disimpan.</small>
                 </form>
@@ -2086,8 +2143,7 @@ function WorkspaceApp() {
                           className="button secondary small-action"
                           type="button"
                           onClick={() => {
-                            setRenewalError('');
-                            setRenewalDocument(document);
+                            openRenewalForm(document);
                           }}
                         >
                           Perpanjang

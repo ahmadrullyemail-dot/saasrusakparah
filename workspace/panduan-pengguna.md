@@ -31,7 +31,7 @@ Siklus status pekerja yang dikelola:
 
 **Offering → Pra-aktif → Aktif → Nonaktif**
 
-Pekerja dapat diaktifkan setelah persyaratan dokumen yang ditetapkan perusahaan terpenuhi. Kelayakan yang ditampilkan aplikasi merupakan rekomendasi; perubahan status tetap dilakukan oleh Admin.
+Admin dapat mengaktifkan pekerja tanpa catatan dokumen. Dokumen dapat dimasukkan kapan saja; status kelengkapan yang ditampilkan aplikasi hanya untuk pemantauan. Aktivasi tetap memerlukan transisi status, nomor pekerja, dan kuota yang valid.
 
 ## 2. Mulai menggunakan aplikasi
 
@@ -112,7 +112,7 @@ Admin dan HR Staff dapat menambahkan pekerja setelah menerima offering letter:
 
 1. Buka **Data pekerja** atau gunakan tombol **Tambah Pekerja**.
 2. Isi identitas dan kontak sesuai formulir, termasuk nama, email, nomor telepon, NIK jika tersedia, departemen, posisi, serta data kontrak dan tanggal.
-3. Pilih jenis dokumen yang wajib dipenuhi pekerja.
+3. Pilih jenis dokumen yang ingin dipantau untuk pekerja tersebut; pilihan ini opsional.
 4. Simpan data. Pekerja baru dimulai pada status **Offering**.
 
 ### 6.2 Mencari dan membuka profil
@@ -128,7 +128,7 @@ Admin mengelola transisi status dari area detail/profil pekerja:
 3. Untuk menonaktifkan di kemudian hari, pilih tanggal efektif nonaktif lalu simpan.
 4. Jadwal akan ditampilkan pada data pekerja dan backend mengubah status menjadi **Nonaktif** saat tanggalnya tiba.
 
-Perubahan status langsung hanya tersedia jika transisi diizinkan. Aktivasi pekerja memerlukan seluruh dokumen wajib terbaru berstatus valid dan masih berlaku. Penonaktifan pekerja juga mencabut link presensi aktifnya.
+Perubahan status langsung hanya tersedia jika transisi diizinkan. Aktivasi memerlukan nomor pekerja yang valid dan kuota tenant; dokumen tidak wajib dan dapat dicatat kemudian. Kelengkapan dokumen ditampilkan sebagai informasi pemantauan. Penonaktifan pekerja juga mencabut link presensi aktifnya.
 
 ### 6.4 Impor dan ekspor Excel
 
@@ -266,7 +266,7 @@ Pencatatan dokumen menyesuaikan status:
 - **Valid/Kedaluwarsa** — mencatat rentang tanggal berlaku.
 - **Ditolak** — ditampilkan tanpa tanggal berlaku.
 
-Hanya catatan terbaru per jenis yang dipakai sebagai acuan persyaratan. Dokumen yang tidak valid atau sudah melewati tanggal berlaku dapat menghalangi aktivasi pekerja. Dashboard dan daftar tindak lanjut menggunakan ambang peringatan efektif per jenis; dokumen kedaluwarsa tetap masuk daftar.
+Catatan terbaru per jenis digunakan untuk menampilkan status pemantauan. Dokumen yang belum ada, tidak valid, atau kedaluwarsa tidak menghalangi aktivasi pekerja. Dokumen dapat dicatat kapan saja; dashboard dan daftar tindak lanjut menggunakan ambang peringatan efektif per jenis dan menampilkan dokumen kedaluwarsa.
 
 > [Placeholder screenshot — Profil pekerja dan panel dokumen]
 >
@@ -327,7 +327,7 @@ Viewer tidak memiliki akses ke halaman maupun endpoint riwayat aktivitas.
 | Lokasi di luar area kerja | Periksa aturan aktivitas dan radius lokasi pada portal. Aktivitas yang diwajibkan di geofence harus dilakukan di area yang cocok. |
 | Anti-Mock Location menolak presensi | Aktifkan lokasi presisi, nonaktifkan aplikasi lokasi simulasi, dan coba kembali dengan sinyal GPS yang lebih baik. |
 | Pengajuan tidak muncul pada Pusat Persetujuan | Pastikan bulan yang dipilih sesuai dengan tanggal pengajuan dan koneksi aplikasi aktif. |
-| Pekerja tidak dapat diaktifkan | Periksa dokumen wajib, status dokumen terbaru, serta tanggal mulai dan akhir berlaku. |
+| Pekerja tidak dapat diaktifkan | Periksa transisi status, nomor pekerja, dan kuota paket. Dokumen tidak menjadi syarat aktivasi. |
 | Link pekerja tidak berlaku | Admin perlu memeriksa status aktif pekerja dan menerbitkan ulang link, khususnya setelah rotasi salt. |
 | Indikator Live tidak tersambung | Tunggu proses reconnect, periksa koneksi jaringan, lalu muat ulang aplikasi jika tetap tidak tersambung. Perubahan juga akan diperbarui melalui fallback berkala. |
 | Impor Excel menandai baris bermasalah | Periksa format kolom dari template, nilai wajib, format tanggal, kode jenis dokumen, serta duplikasi nama/NIK/email. |

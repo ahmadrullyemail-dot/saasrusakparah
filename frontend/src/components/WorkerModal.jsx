@@ -56,7 +56,7 @@ export function WorkerModal({ onClose, onSubmit, busy, error, departmentOptions,
           <div>
             <p className="eyebrow">SETELAH OFFERING</p>
             <h2 id="worker-modal-title">{initialWorker ? 'Edit data pekerja' : 'Tambah pekerja'}</h2>
-            <p className="muted">{initialWorker ? 'Perbarui data personal dan penempatan pekerja.' : 'Catat data awal pekerja dan dokumen wajib untuk posisinya.'}</p>
+            <p className="muted">{initialWorker ? 'Perbarui data personal dan penempatan pekerja.' : 'Catat data awal pekerja. Dokumen dapat ditambahkan atau diperbarui nanti.'}</p>
           </div>
           <button className="modal-close" type="button" aria-label="Tutup modal" onClick={onClose} disabled={busy}>
             <Icon name="x" />
@@ -123,20 +123,20 @@ export function WorkerModal({ onClose, onSubmit, busy, error, departmentOptions,
 
             <section className="document-section">
               <div className="document-card-heading">
-                <h3>Dokumen wajib & compliance</h3>
-                <p>Pilih dokumen sesuai kebutuhan posisi.</p>
+                <h3>Pemantauan dokumen</h3>
+                <p>Pilih jenis dokumen yang ingin dipantau; dokumen bukan prasyarat aktivasi.</p>
               </div>
               <fieldset>
-                <legend className="visually-hidden">Dokumen wajib untuk posisi ini</legend>
+                <legend className="visually-hidden">Jenis dokumen yang dipantau untuk posisi ini</legend>
                 {documentTypesLoading && <small>Memuat jenis dokumen…</small>}
-                {!documentTypesLoading && !documentTypes.some((type) => type.is_active) && <small>Belum ada jenis dokumen aktif. Admin dapat menambahkannya melalui Pengaturan Dokumen. Pekerja dapat dibuat tanpa persyaratan dokumen.</small>}
+                {!documentTypesLoading && !documentTypes.some((type) => type.is_active) && <small>Belum ada jenis dokumen aktif. Admin dapat menambahkannya melalui Pengaturan Dokumen; pekerja tetap dapat dibuat dan diaktifkan.</small>}
                 {documentTypes.filter((type) => type.is_active || initialWorker?.required_document_types?.includes(type.code)).map((type) => (
                   <label className="check-row" key={type.code}>
                     <input type="checkbox" name="required_document_types" value={type.code} defaultChecked={initialWorker?.required_document_types?.includes(type.code) || false} />
                     <span className="uppercase-text">{type.name}{type.is_active ? '' : ' (Nonaktif)'}</span>
                   </label>
                 ))}
-                {!documentTypesLoading && documentTypes.some((type) => type.is_active) && <small>Pilih hanya jenis dokumen yang menjadi persyaratan posisi ini. Tidak ada pilihan bawaan.</small>}
+                {!documentTypesLoading && documentTypes.some((type) => type.is_active) && <small>Pemilihan ini hanya untuk pemantauan dan kelengkapan profil. Tidak ada dokumen yang diwajibkan untuk aktivasi.</small>}
               </fieldset>
             </section>
           </div>

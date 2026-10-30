@@ -165,7 +165,7 @@ Bootstrap database berada di `backend/src/db.js`. Database dibuat bila belum ada
 |---|---|
 | `tenants` | Identitas perusahaan, slug, dan `subscription_plan` (`free`, `pro`, `enterprise`; default `free`). |
 | `users` | User tenant, role, hash password, status aktif, `token_version`, metadata dan BLOB foto profil. |
-| `workers` | Profil pekerja, kontrak, status, daftar dokumen wajib JSON dalam `LONGTEXT`, soft-delete, tanggal efektif nonaktif. |
+| `workers` | Profil pekerja, kontrak, status, daftar jenis dokumen pantauan JSON dalam `LONGTEXT`, soft-delete, tanggal efektif nonaktif. |
 | `departments` | Nama departemen per tenant; hash ternormalisasi untuk mencegah duplikasi. |
 | `document_types` | Katalog jenis dokumen per tenant; `code` stabil, status aktif, ambang peringatan nullable. |
 | `tenant_document_settings` | Ambang peringatan default perusahaan. |
@@ -281,14 +281,14 @@ inactive ─────────→ active
 active ───────────→ inactive
 ```
 
-Transisi yang diizinkan didefinisikan pada `ALLOWED_TRANSITIONS` dalam backend. Hanya Admin dapat mengubah status. Aktivasi dari `preactive` atau `inactive` memerlukan dokumen wajib yang semuanya valid untuk tanggal hari ini. Perhitungan kelayakan tidak otomatis mengubah status.
+Transisi yang diizinkan didefinisikan pada `ALLOWED_TRANSITIONS` dalam backend. Hanya Admin dapat mengubah status. Aktivasi dari `preactive` atau `inactive` tidak memerlukan dokumen; nomor pekerja, kuota, dan transisi status tetap divalidasi. Status kelengkapan dokumen hanya untuk pemantauan dan tidak otomatis mengubah status pekerja.
 
 Data pekerja yang dihapus diarsipkan menggunakan `deleted_at`; bukan hard delete. Soft-delete worker juga mencabut link presensi aktif.
 
 ### Persyaratan dokumen
 
 - Jenis dokumen dibuat dan dikelola per tenant. `code` menjadi identitas stabil walaupun label jenis diedit.
-- Daftar dokumen wajib worker disimpan sebagai JSON pada `workers.required_document_types`.
+- Daftar jenis dokumen yang dipantau per pekerja disimpan sebagai JSON pada `workers.required_document_types` (nama kolom dipertahankan demi kompatibilitas); pilihan ini tidak menetapkan prasyarat aktivasi.
 - Catatan dokumen disimpan sebagai riwayat. Catatan terbaru untuk setiap jenis merupakan acuan kelayakan.
 - Status dokumen: `pending`, `valid`, `expired`, `rejected`.
 - `pending` dapat menyimpan target penyelesaian; `valid`/`expired` memakai rentang berlaku; `rejected` tidak memakai tanggal tersebut.

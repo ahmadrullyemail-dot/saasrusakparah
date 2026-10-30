@@ -18,7 +18,7 @@ Atur **Root Directory** proyek Vercel ke `frontend`, Framework Preset ke **Vite*
 ## Alur MVP
 
 - Registrasi perusahaan dan login admin.
-- Tambah pekerja pasca-offering melalui modal dari dashboard, termasuk kontak wajib, departemen/divisi, posisi, data kontrak, tanggal, dan rate gaji; MCU dan PKWT terpilih secara default sebagai dokumen wajib.
+- Tambah pekerja pasca-offering melalui modal dari dashboard, termasuk kontak wajib, departemen/divisi, posisi, data kontrak, tanggal, dan rate gaji; pemilihan dokumen untuk pemantauan opsional dan dokumen dapat dicatat kemudian.
 - Field Departemen/Divisi menawarkan daftar nilai yang disimpan per tenant dan tetap menerima nama baru; backend menormalisasi format teks saat menyimpan.
 - Pengaturan Profil Saya: lihat dan ubah nama, unggah foto profil JPG/PNG dari perangkat, lihat email/role, dan ganti password dengan verifikasi password lama.
 - Pengaturan Presensi memuat peta Leaflet dengan basemap CARTO Light menggunakan `VITE_CARTO_API_KEY` dan atribusi OpenStreetMap/CARTO untuk lokasi geofence, radius, dan aktivitas yang diwajibkan di tiap area. Browser mengirim key tersebut ke CARTO, jadi batasi key dengan website/referrer yang tepat (contoh host lokal `localhost` dan domain produksi) di dashboard CARTO. Hanya aktivitas yang dicentang yang harus berada dalam radius salah satu area terkait; aktivitas yang tidak dicentang di area mana pun boleh dilakukan dari luar geofence. Dinas bebas geofence dengan bukti JPG/PNG terkompresi maksimal 900 KiB dan persetujuan HR.

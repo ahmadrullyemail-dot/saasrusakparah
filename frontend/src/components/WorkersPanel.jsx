@@ -80,7 +80,7 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                 {workerQuotaFull ? ' — kuota penuh; penambahan/aktivasi dibatasi.' : ` — ${subscription.worker_limit - subscription.active_workers} kuota tersedia.`}
               </p>
             )}
-            {user.role === 'admin' && <p className="settings-footnote">File impor dibaca hanya di browser. Impor mendukung maksimal 500 baris; nama/NIK duplikat dilewati. Isi dokumen wajib sebagai kode dipisahkan koma.</p>}
+            {user.role === 'admin' && <p className="settings-footnote">File impor dibaca hanya di browser. Impor mendukung maksimal 500 baris; nama/NIK duplikat dilewati. Dokumen yang dipilih pada impor hanya untuk pemantauan dan dapat diisi kemudian.</p>}
             {workerImportResult && (
               <div className="worker-import-report" role="status">
                 <strong>Hasil impor:</strong> {workerImportResult.created.length} ditambahkan · {workerImportResult.skipped.length} dilewati · {workerImportResult.errors.length} baris bermasalah.

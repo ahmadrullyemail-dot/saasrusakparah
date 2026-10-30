@@ -20,6 +20,7 @@ const {
   validRequiredDocuments,
   documentTypeCode,
   documentDateFields,
+  documentRenewalFields,
   parseRequiredDocuments,
   canTransitionStatus,
   hashEmail,
@@ -244,6 +245,36 @@ test('document dates are normalized by selected status', () => {
     { valid_from: null, valid_until: '2026-01-01', target_completion_date: null }
   );
   assert.equal(documentDateFields('valid', { valid_from: '2027-01-01', valid_until: '2026-01-01' }), null);
+});
+
+test('document renewal fields follow pending, valid, and rejected statuses', () => {
+  const today = '2026-10-30';
+  assert.deepEqual(
+    documentRenewalFields('pending', { target_completion_date: '2026-11-15', note: '' }, today),
+    {
+      status: 'pending',
+      valid_from: null,
+      valid_until: null,
+      target_completion_date: '2026-11-15',
+      note: null,
+    }
+  );
+  assert.equal(documentRenewalFields('pending', { target_completion_date: '2026-02-01' }, today), null);
+  assert.deepEqual(
+    documentRenewalFields('valid', { valid_from: '2026-10-01', valid_until: '2027-10-01', note: 'ref' }, today),
+    {
+      status: 'valid',
+      valid_from: '2026-10-01',
+      valid_until: '2027-10-01',
+      target_completion_date: null,
+      note: 'ref',
+    }
+  );
+  assert.equal(documentRenewalFields('valid', { valid_from: '', valid_until: '2027-10-01' }, today), null);
+  assert.equal(documentRenewalFields('valid', { valid_from: '2027-10-02', valid_until: '2027-10-01' }, today), null);
+  assert.equal(documentRenewalFields('rejected', { note: 'Tidak valid' }, today).status, 'rejected');
+  assert.equal(documentRenewalFields('rejected', { note: 'No' }, today), null);
+  assert.equal(documentRenewalFields('expired', { note: 'unused' }, today), null);
 });
 
 test('contact and salary validation accepts supported worker details', () => {

@@ -748,6 +748,45 @@ function documentDateFields(status, { valid_from, valid_until, target_completion
   };
 }
 
+function documentRenewalFields(status, input, today) {
+  const note = typeof input.note === 'string' ? input.note.trim() : '';
+  if (status === 'pending') {
+    if (!validDate(input.target_completion_date) || !input.target_completion_date
+      || input.target_completion_date < today || note.length > 500) return null;
+    return {
+      status,
+      valid_from: null,
+      valid_until: null,
+      target_completion_date: input.target_completion_date,
+      note: note || null,
+    };
+  }
+  if (status === 'valid') {
+    const validFrom = input.valid_from || null;
+    const validUntil = input.valid_until || null;
+    if (!validDate(validFrom) || !validDate(validUntil) || !validFrom || !validUntil
+      || validFrom > validUntil || validUntil < today || note.length > 500) return null;
+    return {
+      status,
+      valid_from: validFrom,
+      valid_until: validUntil,
+      target_completion_date: null,
+      note: note || null,
+    };
+  }
+  if (status === 'rejected') {
+    if (note.length < 5 || note.length > 500) return null;
+    return {
+      status,
+      valid_from: null,
+      valid_until: null,
+      target_completion_date: null,
+      note,
+    };
+  }
+  return null;
+}
+
 function evaluateEligibility(worker, documents, today = new Date().toISOString().slice(0, 10)) {
   const required = parseRequiredDocuments(worker.required_document_types);
   const checks = required.map((type) => {
@@ -3532,7 +3571,7 @@ app.get('/api/workers/:id/eligibility', asyncRoute(async (req, res) => {
   res.json({ data: { worker_id: worker.id, status: worker.status, ...evaluateEligibility(worker, documents) } });
 }));
 
-app.post('/api/workers/:id/documents', requireManager, asyncRoute(async (req, res) => {
+app.post('/api/workers/:id/documents', requireManager, documentAttachmentUpload.single('attachment'), asyncRoute(async (req, res) => {
   const worker = await getWorker(req.auth.tenantId, req.params.id);
   if (!worker) return res.status(404).json({ error: 'Worker not found' });
   const { type, status = 'pending' } = req.body || {};
@@ -3544,22 +3583,68 @@ app.post('/api/workers/:id/documents', requireManager, asyncRoute(async (req, re
     || !dateFields) {
     return res.status(400).json({ error: 'Invalid document type, status, or dates' });
   }
-  const [result] = await pool.execute(
-    `INSERT INTO documents (
-       tenant_id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date
-     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      req.auth.tenantId,
-      worker.id,
-      type,
-      status,
-      dateFields.valid_from,
-      dateFields.valid_until,
-      dateFields.target_completion_date,
-    ]
-  );
+  let attachmentStorageKey = null;
+  let attachmentOriginalName = null;
+  let attachmentMimeType = null;
+  let attachmentPath;
+  let attachmentWritten = false;
+  if (req.file) {
+    attachmentMimeType = documentAttachmentMimeType(req.file.buffer);
+    const expectedMimeType = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.pdf': 'application/pdf',
+    }[path.extname(req.file.originalname).toLowerCase()];
+    if (!attachmentMimeType || attachmentMimeType !== expectedMimeType || req.file.mimetype !== attachmentMimeType) {
+      return res.status(400).json({ error: 'Lampiran harus berupa JPG, PNG, atau PDF yang valid.' });
+    }
+    const attachmentId = crypto.randomUUID();
+    const extension = attachmentMimeType === 'image/jpeg'
+      ? 'jpg'
+      : attachmentMimeType === 'image/png' ? 'png' : 'pdf';
+    attachmentStorageKey = `document-attachments/${attachmentId}.${extension}`;
+    attachmentPath = documentAttachmentStoragePath(attachmentStorageKey);
+    if (!attachmentPath) throw new Error('Unable to create a safe document attachment path');
+    await fs.mkdir(DOCUMENT_ATTACHMENT_DIRECTORY, { recursive: true, mode: 0o700 });
+    await fs.writeFile(attachmentPath, req.file.buffer, { flag: 'wx', mode: 0o600 });
+    attachmentWritten = true;
+    attachmentOriginalName = safeLeaveAttachmentName(req.file.originalname);
+  }
+  let result;
+  try {
+    [result] = await pool.execute(
+      `INSERT INTO documents (
+         tenant_id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date,
+         attachment_storage_key, attachment_original_name, attachment_mime_type
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.auth.tenantId,
+        worker.id,
+        type,
+        status,
+        dateFields.valid_from,
+        dateFields.valid_until,
+        dateFields.target_completion_date,
+        attachmentStorageKey,
+        attachmentOriginalName,
+        attachmentMimeType,
+      ]
+    );
+  } catch (error) {
+    if (attachmentWritten) {
+      try {
+        await fs.unlink(attachmentPath);
+      } catch (cleanupError) {
+        if (cleanupError.code !== 'ENOENT') console.error('Failed to remove an uncommitted document attachment:', cleanupError);
+      }
+    }
+    throw error;
+  }
   const [rows] = await pool.execute(
-    `SELECT id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date, created_at, updated_at
+    `SELECT id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date,
+            attachment_storage_key IS NOT NULL AS has_attachment, attachment_original_name,
+            created_at, updated_at
        FROM documents WHERE id = ? AND tenant_id = ?`,
     [result.insertId, req.auth.tenantId]
   );
@@ -3576,6 +3661,7 @@ app.post('/api/workers/:id/documents', requireManager, asyncRoute(async (req, re
       valid_from: document.valid_from ? String(document.valid_from).slice(0, 10) : null,
       valid_until: document.valid_until ? String(document.valid_until).slice(0, 10) : null,
       target_completion_date: document.target_completion_date ? String(document.target_completion_date).slice(0, 10) : null,
+      has_attachment: Boolean(document.has_attachment),
     },
   });
 }));
@@ -3588,24 +3674,9 @@ app.post(
     if (!validWorkerId(req.params.id) || !validWorkerId(req.params.documentId)) {
       return res.status(400).json({ error: 'Invalid worker or document ID' });
     }
-    const newExpiryDate = req.body?.valid_until;
     const noteInput = req.body?.note ?? '';
-    if (!req.file) return res.status(400).json({ error: 'Dokumen baru wajib dilampirkan.' });
-    if (!validDate(newExpiryDate) || !newExpiryDate) {
-      return res.status(400).json({ error: 'Masukkan tanggal kedaluwarsa yang valid.' });
-    }
-    if (typeof noteInput !== 'string' || noteInput.trim().length > 500) {
-      return res.status(400).json({ error: 'Catatan perpanjangan maksimal 500 karakter.' });
-    }
-    const attachmentMimeType = documentAttachmentMimeType(req.file.buffer);
-    const expectedMimeType = {
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.pdf': 'application/pdf',
-    }[path.extname(req.file.originalname).toLowerCase()];
-    if (!attachmentMimeType || attachmentMimeType !== expectedMimeType || req.file.mimetype !== attachmentMimeType) {
-      return res.status(400).json({ error: 'Lampiran harus berupa JPG, PNG, atau PDF yang valid.' });
+    if (typeof noteInput !== 'string') {
+      return res.status(400).json({ error: 'Keterangan dokumen tidak valid.' });
     }
 
     const connection = await pool.getConnection();
@@ -3627,53 +3698,78 @@ app.post(
         return res.status(404).json({ error: 'Worker not found' });
       }
       const [documents] = await connection.execute(
-        `SELECT id, \`type\`, status FROM documents
+        `SELECT id, \`type\`, status, renewed_from_document_id FROM documents
           WHERE id = ? AND worker_id = ? AND tenant_id = ? AND deleted_at IS NULL
             AND superseded_by_document_id IS NULL
           FOR UPDATE`,
         [req.params.documentId, worker.id, req.auth.tenantId]
       );
       const sourceDocument = documents[0];
-      if (!sourceDocument || !['valid', 'expired'].includes(sourceDocument.status)) {
+      const renewableStatus = sourceDocument && (
+        ['valid', 'expired'].includes(sourceDocument.status)
+        || (sourceDocument.renewed_from_document_id != null && ['pending', 'rejected'].includes(sourceDocument.status))
+      );
+      if (!renewableStatus) {
         await connection.rollback();
         return res.status(404).json({ error: 'Dokumen aktif untuk diperpanjang tidak ditemukan.' });
       }
       const [todayRows] = await connection.execute(
         `SELECT DATE_FORMAT(UTC_DATE(), '%Y-%m-%d') AS today`
       );
-      if (newExpiryDate < todayRows[0].today) {
+      const renewal = documentRenewalFields(req.body?.status, req.body || {}, todayRows[0].today);
+      if (!renewal) {
         await connection.rollback();
-        return res.status(400).json({ error: 'Tanggal kedaluwarsa baru tidak boleh sebelum hari ini.' });
+        return res.status(400).json({
+          error: 'Periksa status pembaruan, tanggal yang diperlukan, dan keterangan penolakan (minimal 5 karakter).',
+        });
       }
 
-      const attachmentId = crypto.randomUUID();
-      const extension = attachmentMimeType === 'image/jpeg'
-        ? 'jpg'
-        : attachmentMimeType === 'image/png' ? 'png' : 'pdf';
-      const attachmentStorageKey = `document-attachments/${attachmentId}.${extension}`;
-      attachmentPath = documentAttachmentStoragePath(attachmentStorageKey);
-      if (!attachmentPath) throw new Error('Unable to create a safe document attachment path');
-      await fs.mkdir(DOCUMENT_ATTACHMENT_DIRECTORY, { recursive: true, mode: 0o700 });
-      await fs.writeFile(attachmentPath, req.file.buffer, { flag: 'wx', mode: 0o600 });
-      attachmentWritten = true;
-      const attachmentOriginalName = safeLeaveAttachmentName(req.file.originalname);
-      const renewalNote = noteInput.trim() || null;
+      let attachmentStorageKey = null;
+      let attachmentOriginalName = null;
+      let attachmentMimeType = null;
+      if (req.file) {
+        attachmentMimeType = documentAttachmentMimeType(req.file.buffer);
+        const expectedMimeType = {
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.png': 'image/png',
+          '.pdf': 'application/pdf',
+        }[path.extname(req.file.originalname).toLowerCase()];
+        if (!attachmentMimeType || attachmentMimeType !== expectedMimeType || req.file.mimetype !== attachmentMimeType) {
+          await connection.rollback();
+          return res.status(400).json({ error: 'Lampiran harus berupa JPG, PNG, atau PDF yang valid.' });
+        }
+        const attachmentId = crypto.randomUUID();
+        const extension = attachmentMimeType === 'image/jpeg'
+          ? 'jpg'
+          : attachmentMimeType === 'image/png' ? 'png' : 'pdf';
+        attachmentStorageKey = `document-attachments/${attachmentId}.${extension}`;
+        attachmentPath = documentAttachmentStoragePath(attachmentStorageKey);
+        if (!attachmentPath) throw new Error('Unable to create a safe document attachment path');
+        await fs.mkdir(DOCUMENT_ATTACHMENT_DIRECTORY, { recursive: true, mode: 0o700 });
+        await fs.writeFile(attachmentPath, req.file.buffer, { flag: 'wx', mode: 0o600 });
+        attachmentWritten = true;
+        attachmentOriginalName = safeLeaveAttachmentName(req.file.originalname);
+      }
       const [result] = await connection.execute(
         `INSERT INTO documents (
-           tenant_id, worker_id, \`type\`, status, valid_from, valid_until,
+           tenant_id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date,
            renewed_from_document_id, attachment_storage_key, attachment_original_name,
            attachment_mime_type, renewal_note
-         ) VALUES (?, ?, ?, 'valid', UTC_DATE(), ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           req.auth.tenantId,
           worker.id,
           sourceDocument.type,
-          newExpiryDate,
+          renewal.status,
+          renewal.valid_from,
+          renewal.valid_until,
+          renewal.target_completion_date,
           sourceDocument.id,
           attachmentStorageKey,
           attachmentOriginalName,
           attachmentMimeType,
-          renewalNote,
+          renewal.note,
         ]
       );
       insertedDocumentId = String(result.insertId);
@@ -3687,7 +3783,7 @@ app.post(
         action: 'create',
         entityType: 'document',
         entityId: insertedDocumentId,
-        description: `Dokumen ${sourceDocument.type} pekerja "${worker.full_name}" diperpanjang hingga ${newExpiryDate}.`,
+        description: `Pembaruan dokumen ${sourceDocument.type} pekerja "${worker.full_name}" dicatat dengan status ${renewal.status}${renewal.valid_until ? ` hingga ${renewal.valid_until}` : ''}.`,
       }, connection);
       await connection.commit();
       committed = true;
@@ -3839,13 +3935,6 @@ app.patch('/api/workers/:id/status', requireAdmin, asyncRoute(async (req, res) =
       }, connection);
       await connection.commit();
       return res.json({ data: { id: String(worker.id), status: worker.status, scheduled_inactive_date: effectiveDate } });
-    }
-    if (status === 'active') {
-      const documents = await listWorkerDocuments(req.auth.tenantId, worker.id, connection);
-      if (!evaluateEligibility(worker, documents).eligible) {
-        await connection.rollback();
-        return res.status(409).json({ error: 'Worker cannot be activated until all required documents are valid' });
-      }
     }
     await connection.execute(
       `UPDATE workers SET status = ?, scheduled_inactive_date = NULL
@@ -4089,6 +4178,7 @@ module.exports = {
   validRequiredDocuments,
   documentTypeCode,
   documentDateFields,
+  documentRenewalFields,
   parseRequiredDocuments,
   canTransitionStatus,
   hashEmail,
