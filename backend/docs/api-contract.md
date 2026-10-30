@@ -64,6 +64,8 @@ Jenis dokumen disimpan per tenant dalam katalog dinamis yang kosong saat tenant 
 - `DELETE /api/workers/:id` — mengarsipkan pekerja; hanya Admin. Data pekerja dan catatan terkait tetap tersimpan, dan tautan presensi dicabut.
 - `GET /api/workers/:id/eligibility` — rekomendasi kelayakan tanpa mengubah status.
 - `POST /api/workers/:id/documents` — mencatat dokumen; Admin dan HR Staff. Request: `{ "type", "status", "target_completion_date?" }` untuk `pending`; `{ "type", "status", "valid_from?", "valid_until?" }` untuk `valid`/`expired`; `rejected` tidak menyimpan tanggal.
+- `POST /api/workers/:id/documents/:documentId/renew` — memperpanjang dokumen aktif milik pekerja tenant dengan multipart field `valid_until`, `attachment` (wajib, JPG/PNG/PDF hingga 5 MB), dan `note` opsional (maksimal 500 karakter); Admin dan HR Staff. Dokumen lama tetap sebagai riwayat namun ditandai digantikan, dan dokumen baru menjadi acuan kelayakan/peringatan.
+- `GET /api/workers/:id/documents/:documentId/attachment` — mengunduh lampiran secara tenant-scoped; Admin dan HR Staff. File disimpan di storage privat, tidak disajikan sebagai static, dan tidak dapat diakses melalui URL tanpa sesi.
 - `DELETE /api/workers/:id/documents/:documentId` — mengarsipkan catatan dokumen secara soft-delete; hanya Admin.
 - `PATCH /api/workers/:id/status` — perubahan status; khusus Admin. Request `{ "status" }` atau `{ "status": "inactive", "effective_date": "YYYY-MM-DD" }`. Tanggal mendatang menjadwalkan nonaktif; tanggal hari ini, lampau, atau yang tidak diberikan menonaktifkan langsung. Status `active` memerlukan semua dokumen wajib valid saat ini.
 
@@ -79,6 +81,6 @@ Nama pekerja, alamat, departemen/divisi, posisi, area kerja, nama akun/perusahaa
 
 ## Privasi
 
-Informasi dokumen MCU dibatasi pada jenis, status, tanggal target selesai saat masih menunggu, dan tanggal masa berlaku saat valid/kedaluwarsa. MCU, PKWT, dan SIM wajib memiliki `valid_until` agar dapat memenuhi syarat aktivasi; sertifikasi boleh tidak memiliki tanggal kedaluwarsa. Status ditolak tidak menyimpan tanggal apa pun. Hasil pemeriksaan medis, catatan bebas, dan alasan status tidak menjadi bagian model data API.
+Metadata dokumen mencakup jenis/status/tanggal, catatan referensi perpanjangan opsional, serta metadata lampiran; hasil pemeriksaan medis rinci tidak disimpan. MCU, PKWT, dan SIM wajib memiliki `valid_until` agar dapat memenuhi syarat aktivasi; sertifikasi boleh tidak memiliki tanggal kedaluwarsa. Status ditolak tidak menyimpan tanggal apa pun. Lampiran pembaruan (JPG/PNG/PDF hingga 5 MB) disimpan pada storage privat, hanya dapat diunduh Admin/HR Staff dalam tenant yang sama, dan tidak disajikan sebagai static. Catatan perpanjangan dibatasi 500 karakter dan dimaksudkan untuk referensi singkat, bukan hasil medis. Penyimpanan terenkripsi dan kebijakan retensi lampiran masih perlu ditetapkan sebelum produksi.
 
 Audit trail tenant tersimpan pada tabel `audit_events` dan menampilkan 100 aktivitas terbaru secara default (maksimal 200 per request). Setiap catatan menyimpan snapshot nama/role agar atribusi tetap terbaca setelah perubahan akun. Retensi/pembersihan log belum dikonfigurasi; tentukan kebijakan retensi sebelum produksi.

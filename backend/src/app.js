@@ -26,6 +26,8 @@ const COOKIE_NAME = 'hrd_session';
 const MAX_PROFILE_PHOTO_BYTES = 900 * 1024;
 const MAX_LEAVE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const LEAVE_ATTACHMENT_DIRECTORY = path.resolve(__dirname, '../storage/leave-attachments');
+const MAX_DOCUMENT_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const DOCUMENT_ATTACHMENT_DIRECTORY = path.resolve(__dirname, '../storage/document-attachments');
 const PASSWORD_RESET_TOKEN_TTL_MINUTES = 30;
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX = 10;
@@ -59,6 +61,10 @@ const leaveAttachmentUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_LEAVE_ATTACHMENT_BYTES, files: 1 },
 });
+const documentAttachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_DOCUMENT_ATTACHMENT_BYTES, files: 1 },
+});
 const ATTENDANCE_ACTIVITIES = new Set(['check_in', 'check_out', 'off', 'permission', 'leave', 'sick']);
 const EMPLOYEE_REQUEST_TYPES = new Set(['off', 'permission', 'leave', 'sick']);
 const LEAVE_REQUEST_TYPES = new Set(['izin', 'cuti', 'sakit', 'off']);
@@ -91,6 +97,14 @@ function leaveAttachmentMimeType(file) {
   return null;
 }
 
+function documentAttachmentMimeType(file) {
+  if (!Buffer.isBuffer(file)) return null;
+  const imageMimeType = leaveAttachmentMimeType(file);
+  if (imageMimeType) return imageMimeType;
+  if (file.length >= 5 && file.subarray(0, 5).equals(Buffer.from('%PDF-'))) return 'application/pdf';
+  return null;
+}
+
 function safeLeaveAttachmentName(value) {
   const basename = path.basename(String(value || 'lampiran'))
     .replace(/[^a-zA-Z0-9._-]+/g, '_')
@@ -105,6 +119,14 @@ function leaveAttachmentStoragePath(storageKey) {
   }
   const filePath = path.resolve(__dirname, '../storage', storageKey);
   return filePath.startsWith(`${LEAVE_ATTACHMENT_DIRECTORY}${path.sep}`) ? filePath : null;
+}
+
+function documentAttachmentStoragePath(storageKey) {
+  if (typeof storageKey !== 'string' || !/^document-attachments\/[0-9a-f-]{36}\.(jpg|png|pdf)$/.test(storageKey)) {
+    return null;
+  }
+  const filePath = path.resolve(__dirname, '../storage', storageKey);
+  return filePath.startsWith(`${DOCUMENT_ATTACHMENT_DIRECTORY}${path.sep}`) ? filePath : null;
 }
 
 function distanceInMeters(latitude1, longitude1, latitude2, longitude2) {
@@ -669,16 +691,35 @@ async function getWorker(tenantId, workerId, connection = pool, lock = false) {
 
 async function listWorkerDocuments(tenantId, workerId, connection = pool) {
   const [rows] = await connection.execute(
-    `SELECT id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date, created_at, updated_at
+    `SELECT id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date,
+            renewed_from_document_id, superseded_by_document_id,
+            attachment_storage_key IS NOT NULL AS has_attachment,
+            attachment_original_name, renewal_note, created_at, updated_at
        FROM documents WHERE tenant_id = ? AND worker_id = ? AND deleted_at IS NULL ORDER BY id DESC`,
     [tenantId, workerId]
   );
   return rows.map((document) => ({
     ...document,
+    id: String(document.id),
+    worker_id: String(document.worker_id),
+    renewed_from_document_id: document.renewed_from_document_id == null ? null : String(document.renewed_from_document_id),
+    superseded_by_document_id: document.superseded_by_document_id == null ? null : String(document.superseded_by_document_id),
+    has_attachment: Boolean(document.has_attachment),
     valid_from: document.valid_from ? String(document.valid_from).slice(0, 10) : null,
     valid_until: document.valid_until ? String(document.valid_until).slice(0, 10) : null,
     target_completion_date: document.target_completion_date ? String(document.target_completion_date).slice(0, 10) : null,
   }));
+}
+
+function redactDocumentForViewer(document, role) {
+  if (role !== 'viewer') return document;
+  const {
+    attachment_original_name,
+    renewal_note,
+    has_attachment,
+    ...viewerDocument
+  } = document;
+  return viewerDocument;
 }
 
 function documentDateFields(status, { valid_from, valid_until, target_completion_date }) {
@@ -711,7 +752,7 @@ function evaluateEligibility(worker, documents, today = new Date().toISOString()
   const required = parseRequiredDocuments(worker.required_document_types);
   const checks = required.map((type) => {
     const requiresExpiry = ['mcu', 'pkwt', 'sim'].includes(type);
-    const latest = documents.find((document) => document.type === type);
+    const latest = documents.find((document) => document.type === type && !document.superseded_by_document_id);
     const current = latest
       && latest.status === 'valid'
       && (!requiresExpiry || latest.valid_until)
@@ -2640,6 +2681,7 @@ app.get('/api/dashboard', asyncRoute(async (req, res) => {
        LEFT JOIN document_types dt
          ON dt.tenant_id = d.tenant_id AND dt.code = d.type
       WHERE d.tenant_id = ? AND d.deleted_at IS NULL
+        AND d.superseded_by_document_id IS NULL
         AND ((d.status = 'valid'
           AND d.valid_until <= DATE_ADD(UTC_DATE(), INTERVAL COALESCE(dt.warning_threshold_days, ?) DAY))
           OR d.status = 'expired')`,
@@ -2942,7 +2984,7 @@ app.get('/api/workers', asyncRoute(async (req, res) => {
       ...redactWorkerForViewer(worker, req.auth.role),
       uuid_lock_enabled: Boolean(worker.uuid_lock_enabled),
       required_document_types: parseRequiredDocuments(worker.required_document_types),
-      documents,
+      documents: documents.map((document) => redactDocumentForViewer(document, req.auth.role)),
       eligibility: evaluateEligibility(worker, documents),
     };
   }));
@@ -3312,7 +3354,7 @@ app.get('/api/workers/:id', asyncRoute(async (req, res) => {
       ...redactWorkerForViewer(worker, req.auth.role),
       uuid_lock_enabled: Boolean(worker.uuid_lock_enabled),
       required_document_types: parseRequiredDocuments(worker.required_document_types),
-      documents,
+      documents: documents.map((document) => redactDocumentForViewer(document, req.auth.role)),
       history,
       eligibility: evaluateEligibility(worker, documents),
     },
@@ -3538,6 +3580,179 @@ app.post('/api/workers/:id/documents', requireManager, asyncRoute(async (req, re
   });
 }));
 
+app.post(
+  '/api/workers/:id/documents/:documentId/renew',
+  requireManager,
+  documentAttachmentUpload.single('attachment'),
+  asyncRoute(async (req, res) => {
+    if (!validWorkerId(req.params.id) || !validWorkerId(req.params.documentId)) {
+      return res.status(400).json({ error: 'Invalid worker or document ID' });
+    }
+    const newExpiryDate = req.body?.valid_until;
+    const noteInput = req.body?.note ?? '';
+    if (!req.file) return res.status(400).json({ error: 'Dokumen baru wajib dilampirkan.' });
+    if (!validDate(newExpiryDate) || !newExpiryDate) {
+      return res.status(400).json({ error: 'Masukkan tanggal kedaluwarsa yang valid.' });
+    }
+    if (typeof noteInput !== 'string' || noteInput.trim().length > 500) {
+      return res.status(400).json({ error: 'Catatan perpanjangan maksimal 500 karakter.' });
+    }
+    const attachmentMimeType = documentAttachmentMimeType(req.file.buffer);
+    const expectedMimeType = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.pdf': 'application/pdf',
+    }[path.extname(req.file.originalname).toLowerCase()];
+    if (!attachmentMimeType || attachmentMimeType !== expectedMimeType || req.file.mimetype !== attachmentMimeType) {
+      return res.status(400).json({ error: 'Lampiran harus berupa JPG, PNG, atau PDF yang valid.' });
+    }
+
+    const connection = await pool.getConnection();
+    let attachmentPath;
+    let attachmentWritten = false;
+    let committed = false;
+    let insertedDocumentId;
+    try {
+      await connection.beginTransaction();
+      const [workers] = await connection.execute(
+        `SELECT id, full_name FROM workers
+          WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL
+          FOR UPDATE`,
+        [req.params.id, req.auth.tenantId]
+      );
+      const worker = workers[0];
+      if (!worker) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Worker not found' });
+      }
+      const [documents] = await connection.execute(
+        `SELECT id, \`type\`, status FROM documents
+          WHERE id = ? AND worker_id = ? AND tenant_id = ? AND deleted_at IS NULL
+            AND superseded_by_document_id IS NULL
+          FOR UPDATE`,
+        [req.params.documentId, worker.id, req.auth.tenantId]
+      );
+      const sourceDocument = documents[0];
+      if (!sourceDocument || !['valid', 'expired'].includes(sourceDocument.status)) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Dokumen aktif untuk diperpanjang tidak ditemukan.' });
+      }
+      const [todayRows] = await connection.execute(
+        `SELECT DATE_FORMAT(UTC_DATE(), '%Y-%m-%d') AS today`
+      );
+      if (newExpiryDate < todayRows[0].today) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'Tanggal kedaluwarsa baru tidak boleh sebelum hari ini.' });
+      }
+
+      const attachmentId = crypto.randomUUID();
+      const extension = attachmentMimeType === 'image/jpeg'
+        ? 'jpg'
+        : attachmentMimeType === 'image/png' ? 'png' : 'pdf';
+      const attachmentStorageKey = `document-attachments/${attachmentId}.${extension}`;
+      attachmentPath = documentAttachmentStoragePath(attachmentStorageKey);
+      if (!attachmentPath) throw new Error('Unable to create a safe document attachment path');
+      await fs.mkdir(DOCUMENT_ATTACHMENT_DIRECTORY, { recursive: true, mode: 0o700 });
+      await fs.writeFile(attachmentPath, req.file.buffer, { flag: 'wx', mode: 0o600 });
+      attachmentWritten = true;
+      const attachmentOriginalName = safeLeaveAttachmentName(req.file.originalname);
+      const renewalNote = noteInput.trim() || null;
+      const [result] = await connection.execute(
+        `INSERT INTO documents (
+           tenant_id, worker_id, \`type\`, status, valid_from, valid_until,
+           renewed_from_document_id, attachment_storage_key, attachment_original_name,
+           attachment_mime_type, renewal_note
+         ) VALUES (?, ?, ?, 'valid', UTC_DATE(), ?, ?, ?, ?, ?, ?)`,
+        [
+          req.auth.tenantId,
+          worker.id,
+          sourceDocument.type,
+          newExpiryDate,
+          sourceDocument.id,
+          attachmentStorageKey,
+          attachmentOriginalName,
+          attachmentMimeType,
+          renewalNote,
+        ]
+      );
+      insertedDocumentId = String(result.insertId);
+      await connection.execute(
+        `UPDATE documents SET superseded_by_document_id = ?
+          WHERE id = ? AND worker_id = ? AND tenant_id = ? AND deleted_at IS NULL
+            AND superseded_by_document_id IS NULL`,
+        [insertedDocumentId, sourceDocument.id, worker.id, req.auth.tenantId]
+      );
+      await recordAudit(req, {
+        action: 'create',
+        entityType: 'document',
+        entityId: insertedDocumentId,
+        description: `Dokumen ${sourceDocument.type} pekerja "${worker.full_name}" diperpanjang hingga ${newExpiryDate}.`,
+      }, connection);
+      await connection.commit();
+      committed = true;
+    } catch (error) {
+      if (!committed) {
+        try {
+          await connection.rollback();
+        } catch (rollbackError) {
+          console.error('Failed to roll back document renewal transaction:', rollbackError);
+        }
+      }
+      if (attachmentWritten) {
+        try {
+          await fs.unlink(attachmentPath);
+        } catch (cleanupError) {
+          if (cleanupError.code !== 'ENOENT') {
+            console.error('Failed to remove an uncommitted document attachment:', cleanupError);
+          }
+        }
+      }
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    const documents = await listWorkerDocuments(req.auth.tenantId, req.params.id);
+    const renewedDocument = documents.find((document) => document.id === insertedDocumentId);
+    res.status(201).json({ data: renewedDocument });
+  })
+);
+
+app.get('/api/workers/:id/documents/:documentId/attachment', requireManager, asyncRoute(async (req, res) => {
+  if (!validWorkerId(req.params.id) || !validWorkerId(req.params.documentId)) {
+    return res.status(400).json({ error: 'Invalid worker or document ID' });
+  }
+  const [rows] = await pool.execute(
+    `SELECT attachment_storage_key, attachment_original_name, attachment_mime_type
+       FROM documents
+      WHERE id = ? AND worker_id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+    [req.params.documentId, req.params.id, req.auth.tenantId]
+  );
+  const attachment = rows[0];
+  if (!attachment || !attachment.attachment_storage_key) {
+    return res.status(404).json({ error: 'Attachment not found' });
+  }
+  const filePath = documentAttachmentStoragePath(attachment.attachment_storage_key);
+  if (!filePath) {
+    console.error(`Invalid document attachment storage key for document ${req.params.documentId}`);
+    return res.status(500).json({ error: 'Attachment is unavailable' });
+  }
+  try {
+    await fs.access(filePath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return res.status(404).json({ error: 'Attachment not found' });
+    throw error;
+  }
+  res.set({
+    'Cache-Control': 'private, no-store',
+    'Content-Disposition': `attachment; filename="${attachment.attachment_original_name.replace(/["\\\r\n]/g, '_')}"`,
+    'Content-Type': attachment.attachment_mime_type,
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.sendFile(filePath);
+}));
+
 app.delete('/api/workers/:id/documents/:documentId', requireAdmin, asyncRoute(async (req, res) => {
   const worker = await getWorker(req.auth.tenantId, req.params.id);
   if (!worker) return res.status(404).json({ error: 'Worker not found' });
@@ -3688,12 +3903,17 @@ app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
-      const maxSizeMessage = req.originalUrl.startsWith('/api/leaves')
-        ? 'Leave attachment must be 5 MB or smaller'
-        : 'Profile and attendance images must be 900 KB or smaller';
+      const maxSizeMessage = req.originalUrl.includes('/documents/') && req.originalUrl.endsWith('/renew')
+        ? 'Document attachment must be 5 MB or smaller'
+        : req.originalUrl.startsWith('/api/leaves')
+          ? 'Leave attachment must be 5 MB or smaller'
+          : 'Profile and attendance images must be 900 KB or smaller';
       return res.status(413).json({ error: maxSizeMessage });
     }
-    return res.status(400).json({ error: 'Upload one JPG or PNG image at a time' });
+    const uploadMessage = req.originalUrl.includes('/documents/') && req.originalUrl.endsWith('/renew')
+      ? 'Upload one JPG, PNG, or PDF document at a time'
+      : 'Upload one JPG or PNG image at a time';
+    return res.status(400).json({ error: uploadMessage });
   }
   if (error.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Request body must contain valid JSON' });
@@ -3862,6 +4082,8 @@ module.exports = {
   leaveAttachmentMimeType,
   safeLeaveAttachmentName,
   leaveAttachmentStoragePath,
+  documentAttachmentMimeType,
+  documentAttachmentStoragePath,
   validDocumentWarningThreshold,
   attendanceMonthRange,
   validRequiredDocuments,

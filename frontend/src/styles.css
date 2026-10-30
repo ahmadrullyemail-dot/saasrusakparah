@@ -192,7 +192,10 @@ h3 { margin-bottom: 11px; font-size: 14px; }
 .dashboard-document-heading-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; }
 .dashboard-document-list { margin: 0; padding: 0; list-style: none; }
 .dashboard-document-list li + li { border-top: 1px solid var(--line); }
+.dashboard-document-row { display: flex; align-items: center; gap: 4px; padding-right: 12px; }
 .dashboard-document-item { display: flex; width: 100%; align-items: center; gap: 12px; padding: 12px 20px; border: 0; color: var(--ink); background: transparent; text-align: left; transition: background .15s ease; }
+.dashboard-document-row .dashboard-document-item { min-width: 0; flex: 1; }
+.dashboard-document-renew { flex: 0 0 auto; white-space: nowrap; }
 .dashboard-document-item:hover { background: #f8f9ff; }
 .dashboard-document-item:focus-visible { position: relative; outline: 2px solid var(--primary); outline-offset: -3px; }
 .dashboard-document-indicator { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; background: #d89a3d; box-shadow: 0 0 0 4px #d89a3d1c; }
@@ -289,6 +292,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .confirmation-input-label input:focus { border-color: #8795ef; box-shadow: 0 0 0 3px #546be41c; }
 .confirmation-modal-error { margin: -5px 0 14px; color: #9d3940; font-size: 11px; line-height: 1.5; }
 .confirmation-modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
+.document-renewal-modal { width: min(100%, 520px); }
+.document-renewal-modal .form-stack { gap: 13px; }
+.document-renewal-modal .modal-error { margin: 0; }
 .worker-modal { display: flex; flex-direction: column; width: min(100%, 820px); max-height: min(90vh, 900px); overflow: hidden; border: 1px solid var(--line); border-radius: 17px; background: #fff; box-shadow: 0 24px 80px #172b4d35; }
 .modal-heading { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 25px 25px 19px; border-bottom: 1px solid var(--line); }
 .modal-heading .eyebrow { margin-bottom: 5px; }
@@ -465,12 +471,13 @@ fieldset > small { grid-column: 1 / -1; }
 .document-heading { display: flex; align-items: center; justify-content: space-between; margin: 19px 0 9px; }
 .document-heading h3 { margin: 0; }.document-heading span { color: #8b96a7; font-size: 10px; }
 .document-list { display: grid; }
-.document-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f0f2f5; }
+.document-item { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f0f2f5; }
 .document-icon { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 8px; color: #566bd8; background: #eef0ff; font-size: 11px; font-weight: 700; }
 .document-item > span:nth-child(2), .expiry-item > span:nth-child(2) { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .document-item strong, .expiry-item strong { color: #394a66; font-size: 10px; }
 .document-item small, .expiry-item small { color: #8793a5; font-size: 9px; }
 .document-item .button { flex: 0 0 auto; }
+.document-item .document-renewal-note { flex-basis: 100%; margin-left: 39px; }
 .attendance-readonly-note { color: #8994a6; font-size: 9px; font-weight: 650; }
 .status-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 17px; }
 .right-column { display: grid; gap: 16px; }
@@ -478,6 +485,7 @@ fieldset > small { grid-column: 1 / -1; }
 .document-form-panel .form-stack { gap: 10px; }
 .expiry-list { display: grid; gap: 13px; }
 .expiry-item { display: flex; align-items: center; gap: 9px; }
+.expiry-item .button { flex: 0 0 auto; white-space: nowrap; }
 .expiry-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #e3a342; }
 .expiry-dot.expired { background: #cc5b5b; }
 .footer-note { padding: 18px 3px 0; color: #8894a6; font-size: 10px; }

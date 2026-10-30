@@ -13,6 +13,8 @@ const {
   leaveAttachmentMimeType,
   safeLeaveAttachmentName,
   leaveAttachmentStoragePath,
+  documentAttachmentMimeType,
+  documentAttachmentStoragePath,
   validDocumentWarningThreshold,
   attendanceMonthRange,
   validRequiredDocuments,
@@ -141,6 +143,16 @@ test('the latest record for a required document type is authoritative', () => {
   ];
 
   assert.equal(evaluateEligibility(worker, documents, '2026-10-23').eligible, false);
+});
+
+test('renewed document records replace superseded records as the eligibility source', () => {
+  const worker = { required_document_types: ['mcu'] };
+  const documents = [
+    { id: '2', type: 'mcu', status: 'valid', valid_until: '2027-10-01' },
+    { id: '1', type: 'mcu', status: 'expired', valid_until: '2025-01-01', superseded_by_document_id: '2' },
+  ];
+
+  assert.equal(evaluateEligibility(worker, documents, '2026-10-23').eligible, true);
 });
 
 test('date and required-document input validation rejects invalid values', () => {
@@ -340,6 +352,18 @@ test('leave attachment uploads are signature-checked and stored under private ra
   assert.equal(safeLeaveAttachmentName('../../surat izin!!.png'), 'surat_izin_.png');
   assert.match(leaveAttachmentStoragePath('leave-attachments/123e4567-e89b-12d3-a456-426614174000.jpg'), /storage[\\/]leave-attachments[\\/]123e4567-e89b-12d3-a456-426614174000\.jpg$/);
   assert.equal(leaveAttachmentStoragePath('leave-attachments/../../app.js'), null);
+});
+
+test('document renewal attachments accept only signed JPG, PNG, and PDF with private random paths', () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
+  const pdf = Buffer.from('%PDF-1.7');
+  assert.equal(documentAttachmentMimeType(png), 'image/png');
+  assert.equal(documentAttachmentMimeType(jpeg), 'image/jpeg');
+  assert.equal(documentAttachmentMimeType(pdf), 'application/pdf');
+  assert.equal(documentAttachmentMimeType(Buffer.from('not a document')), null);
+  assert.match(documentAttachmentStoragePath('document-attachments/123e4567-e89b-12d3-a456-426614174000.pdf'), /storage[\\/]document-attachments[\\/]123e4567-e89b-12d3-a456-426614174000\.pdf$/);
+  assert.equal(documentAttachmentStoragePath('document-attachments/../../app.js'), null);
 });
 
 test('profile photo storage stays below legacy MariaDB packet limits', () => {

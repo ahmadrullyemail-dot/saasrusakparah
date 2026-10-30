@@ -160,11 +160,18 @@ async function initializeDatabase() {
       valid_from DATE NULL,
       valid_until DATE NULL,
       target_completion_date DATE NULL,
+      renewed_from_document_id BIGINT UNSIGNED NULL,
+      superseded_by_document_id BIGINT UNSIGNED NULL,
+      attachment_storage_key VARCHAR(100) NULL,
+      attachment_original_name VARCHAR(255) NULL,
+      attachment_mime_type VARCHAR(32) NULL,
+      renewal_note VARCHAR(500) NULL,
       deleted_at DATETIME NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       KEY ix_documents_worker_type (tenant_id, worker_id, \`type\`),
       KEY ix_documents_expiry (tenant_id, valid_until),
+      KEY ix_documents_superseded (tenant_id, superseded_by_document_id),
       CONSTRAINT fk_documents_worker_tenant FOREIGN KEY (worker_id, tenant_id) REFERENCES workers(id, tenant_id) ON DELETE CASCADE
     ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS worker_status_history (
@@ -554,6 +561,23 @@ async function initializeDatabase() {
   }
   if (!existingDocumentColumns.some(({ COLUMN_NAME }) => COLUMN_NAME === 'deleted_at')) {
     await pool.query('ALTER TABLE documents ADD COLUMN deleted_at DATETIME NULL');
+  }
+  const existingDocumentColumnNames = new Set(existingDocumentColumns.map(({ COLUMN_NAME }) => COLUMN_NAME));
+  const documentMigrations = [
+    ['renewed_from_document_id', 'BIGINT UNSIGNED NULL'],
+    ['superseded_by_document_id', 'BIGINT UNSIGNED NULL'],
+    ['attachment_storage_key', 'VARCHAR(100) NULL'],
+    ['attachment_original_name', 'VARCHAR(255) NULL'],
+    ['attachment_mime_type', 'VARCHAR(32) NULL'],
+    ['renewal_note', 'VARCHAR(500) NULL'],
+  ];
+  for (const [columnName, columnDefinition] of documentMigrations) {
+    if (!existingDocumentColumnNames.has(columnName)) {
+      await pool.query(`ALTER TABLE documents ADD COLUMN \`${columnName}\` ${columnDefinition}`);
+    }
+  }
+  if (!existingDocumentColumnNames.has('superseded_by_document_id')) {
+    await pool.query('ALTER TABLE documents ADD KEY ix_documents_superseded (tenant_id, superseded_by_document_id)');
   }
   await pool.query(
     `UPDATE departments
