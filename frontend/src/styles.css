@@ -502,6 +502,7 @@ fieldset > small { grid-column: 1 / -1; }
 .attendance-status-control { display: flex; align-items: center; gap: 5px; }
 .attendance-status-control select { min-height: 32px; max-width: 130px; padding: 5px; border: 1px solid #dfe5ef; border-radius: 6px; color: #526079; background: white; font-size: 10px; }
 .attendance-link-cell { min-width: 210px; }
+.attendance-portal-actions { display: grid; justify-items: start; gap: 8px; }
 .attendance-link-box { display: grid; grid-template-columns: minmax(100px,1fr) auto auto; gap: 5px; margin-top: 7px; }
 .attendance-link-box input { min-width: 0; padding: 6px; border: 1px solid #dfe5ef; border-radius: 6px; color: #64728a; font-size: 10px; }
 .company-portal-link-box { grid-template-columns: minmax(0,1fr) auto; align-items: center; margin: 0; }

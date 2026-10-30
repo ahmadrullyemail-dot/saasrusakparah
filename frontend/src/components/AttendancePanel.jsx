@@ -1,7 +1,7 @@
 import { attendanceMonthLabel, attendanceMonthSummary, attendanceStatusLabel, formatAttendanceTime, formatCoordinate, monthlyAttendanceCode } from '../lib/hrd.js';
 import { Icon } from './Icon.jsx';
 
-export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, companyPortalLink, companyPortalLinkNeedsRotation, attendanceStatusDrafts, attendanceSearch, busy, copyToClipboard, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, resetWorkerPortalSession, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance }) {
+export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, companyPortalLink, companyPortalLinkNeedsRotation, attendanceStatusDrafts, attendanceSearch, busy, copyToClipboard, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, resetWorkerPortalSession, updateWorkerUuidLock, uuidLockBusy, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance }) {
   return (
 <section
           className="panel attendance-panel"
@@ -243,7 +243,7 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
               />
             </label>
           </div>*/}
-          <p className="muted attendance-link-note">Semua pekerja menggunakan satu tautan portal perusahaan. UUID perangkat diterbitkan saat verifikasi nomor pekerja; Admin dan HR Staff dapat mereset UUID melalui daftar pekerja.</p>
+          <p className="muted attendance-link-note">Semua pekerja menggunakan satu tautan portal perusahaan. Kunci UUID dan reset perangkat dikelola langsung pada setiap baris pekerja di tabel ini.</p>
           {user.role === 'admin' && companyPortalLink && (
             <div className="attendance-link-box company-portal-link-box">
               <label className="visually-hidden" htmlFor="attendance-company-portal-link">Tautan portal perusahaan</label>
@@ -334,18 +334,38 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
                         ) : '—'}
                       </td>
                       <td className="attendance-link-cell">
-                        {(user.role === 'admin' || user.role === 'hr_manager')
-                          && attendanceSettings.company_portal_configured
-                          && (
+                        {(user.role === 'admin' || user.role === 'hr_manager') && (
+                          <div className="attendance-portal-actions">
+                            <label
+                              className="switch-control uuid-lock-control"
+                              title="Jika nonaktif, UUID klien yang hilang atau berbeda akan diganti saat verifikasi nomor pekerja."
+                            >
+                              <span>Kunci UUID</span>
+                              <input
+                                type="checkbox"
+                                role="switch"
+                                aria-label={`Kunci UUID untuk ${record.full_name}`}
+                                checked={Boolean(record.uuid_lock_enabled)}
+                                disabled={busy || Boolean(uuidLockBusy[record.worker_id])}
+                                onChange={(event) => updateWorkerUuidLock(record.worker_id, event.target.checked)}
+                              />
+                              <span className="switch-track" aria-hidden="true"><span /></span>
+                              <span>{record.uuid_lock_enabled ? 'Aktif' : 'Nonaktif'}</span>
+                              {uuidLockBusy[record.worker_id] && <span className="attendance-spinner uuid-lock-spinner" role="status" aria-label="Menyimpan perubahan" />}
+                            </label>
+                            {attendanceSettings.company_portal_configured && (
                             <button
                               className="button secondary"
                               type="button"
-                              disabled={busy}
+                              disabled={busy || Boolean(uuidLockBusy[record.worker_id]) || !record.worker_number}
                               onClick={() => resetWorkerPortalSession(record.worker_id)}
+                              title={!record.worker_number ? 'Nomor pekerja belum tersedia' : undefined}
                             >
                               <Icon name="refresh" size={15} /> Reset UUID
                             </button>
-                          )}
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td>{user.role === 'admin' && record.attendance_id && <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveAttendance(record.worker_id)}>Arsipkan</button>}</td>
                     </tr>

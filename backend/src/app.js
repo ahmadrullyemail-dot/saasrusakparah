@@ -2721,7 +2721,7 @@ app.get('/api/attendance', asyncRoute(async (req, res) => {
   );
   const attendanceDate = dateRows[0].attendance_date;
   const [rows] = await pool.execute(
-    `SELECT w.id AS worker_id, w.full_name, w.position,
+    `SELECT w.id AS worker_id, w.full_name, w.position, w.worker_number, w.uuid_lock_enabled,
             a.id AS attendance_id, a.status, a.attendance_type, a.approval_status, a.approval_note,
             a.check_in_time, a.check_out_time, a.location_id, a.approved_by, a.approval_updated_at,
             a.check_in_latitude, a.check_in_longitude,
@@ -2742,6 +2742,7 @@ app.get('/api/attendance', asyncRoute(async (req, res) => {
         ...row,
         worker_id: String(row.worker_id),
         location_id: row.location_id == null ? null : String(row.location_id),
+        uuid_lock_enabled: Boolean(row.uuid_lock_enabled),
         has_evidence: Boolean(row.has_evidence),
       })),
     },

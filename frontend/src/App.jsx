@@ -392,6 +392,12 @@ function WorkspaceApp() {
       setWorkers((current) => current.map((worker) => (
         worker.id === workerId ? { ...worker, uuid_lock_enabled: savedValue } : worker
       )));
+      setAttendanceData((current) => ({
+        ...current,
+        records: current.records.map((record) => (
+          record.worker_id === workerId ? { ...record, uuid_lock_enabled: savedValue } : record
+        )),
+      }));
       setNotice(`Kunci UUID ${savedValue ? 'diaktifkan' : 'dinonaktifkan'} untuk pekerja.`);
     } catch (requestError) {
       showError(requestError);
@@ -1755,9 +1761,6 @@ function WorkspaceApp() {
           workerImportResult={workerImportResult}
           workerQuotaFull={workerQuotaFull}
           workerSearch={workerSearch}
-          resetWorkerPortalSession={resetWorkerPortalSession}
-          uuidLockBusy={uuidLockBusy}
-          updateWorkerUuidLock={updateWorkerUuidLock}
           workers={workers}
         />
 
@@ -1776,6 +1779,9 @@ function WorkspaceApp() {
           attendanceSearch={attendanceSearch}
           busy={busy}
           copyToClipboard={copyToClipboard}
+          uuidLockBusy={uuidLockBusy}
+          updateWorkerUuidLock={updateWorkerUuidLock}
+          resetWorkerPortalSession={resetWorkerPortalSession}
           decideAttendanceRequest={decideAttendanceRequest}
           decideLeaveRequest={decideLeaveRequest}
           openLeaveRejection={openLeaveRejection}
@@ -1790,7 +1796,6 @@ function WorkspaceApp() {
           pendingLeaveRequestsLoading={pendingLeaveRequestsLoading}
           reviewingAttendance={reviewingAttendance}
           saveAttendanceStatus={saveAttendanceStatus}
-          resetWorkerPortalSession={resetWorkerPortalSession}
           selectMatrixAttendanceDate={selectMatrixAttendanceDate}
           setAttendanceDate={setAttendanceDate}
           setAttendanceMonth={setAttendanceMonth}
