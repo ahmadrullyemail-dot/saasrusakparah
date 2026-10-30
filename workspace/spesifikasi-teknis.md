@@ -2,7 +2,7 @@
 
 **rusakparah.web.id**  
 Dokumen untuk developer, maintainer, dan operator teknis  
-Versi dokumen: 1.0 · Diperbarui: 25 Oktober 2026
+Versi dokumen: 1.0 · Diperbarui: 30 Oktober 2026
 
 > Dokumen ini mendeskripsikan implementasi yang ada pada workspace saat ini. Istilah “ERNMySQL” pada kebutuhan dipetakan ke basis data MySQL/MariaDB yang digunakan backend. Perbedaan dari permintaan atau batasan implementasi ditandai secara eksplisit, bukan diasumsikan sudah tersedia.
 
@@ -35,7 +35,8 @@ Aplikasi mengelola data tenant perusahaan untuk:
 - katalog dokumen dan evaluasi kelayakan;
 - presensi harian, pengajuan, geofence, serta persetujuan;
 - dashboard, riwayat aktivitas, dan pengaturan tenant;
-- portal presensi pekerja melalui link bertoken.
+- portal presensi pekerja melalui tautan token perusahaan;
+- landing page publik dengan metadata SEO dan sitemap URL utama.
 
 Frontend dan backend merupakan dua aplikasi terpisah yang berkomunikasi melalui HTTP API JSON dan Socket.IO. Database adalah MySQL/MariaDB dengan InnoDB. Sesi aplikasi memakai cookie HttpOnly bertanda tangan JWT.
 
@@ -69,6 +70,7 @@ flowchart LR
    - Mengambil data dari API Express dengan `fetch` dan `credentials: 'include'`.
    - Menggunakan Socket.IO client untuk mendengar event tenant dan memicu fetch ulang.
    - Memproses workbook Excel di browser; file workbook tidak dikirim sebagai file ke backend.
+   - Landing page root memuat metadata SEO pada HTML awal; aset publik `sitemap.xml` dan `robots.txt` disalin dari `frontend/public/`.
 2. **Express API**
    - Menyediakan autentikasi, validasi request, aturan transisi, RBAC, query tenant-scoped, dan operasi database.
    - Menyediakan endpoint publik terbatas untuk portal pekerja yang memvalidasi token presensi.
@@ -126,6 +128,10 @@ backend/
     api-contract.md        # kontrak endpoint dan role
   backend-tasks.md
 frontend/
+  index.html               # metadata SEO dan JSON-LD
+  public/
+    sitemap.xml            # hanya URL landing page
+    robots.txt             # aturan crawler dan URL sitemap
   src/
     App.jsx                # SPA HRD dan local state
     Presensi.jsx           # portal pekerja
@@ -147,7 +153,7 @@ frontend/
 
 ### Request portal pekerja
 
-Portal pekerja menggunakan endpoint `/api/public/attendance` dengan `worker_id` dan bearer token. Backend memvalidasi link terhadap `worker_attendance_links`, worker aktif, tenant dan salt. Route tidak memakai sesi user HR. Check-In/Check-Out/pengajuan dijalankan dalam transaksi dan event publik dipancarkan sesudah commit.
+Pekerja membuka tautan bearer perusahaan `/portal?company_token=...` dan memverifikasi nomor pekerja melalui `/api/public/portal/verify`. UUID perangkat tidak ditampilkan; client mengambilnya dari `localStorage` dan mengirimkannya otomatis jika tersedia. Backend memvalidasi token perusahaan, nomor pekerja aktif, dan aturan `uuid_lock_enabled`, lalu menerbitkan atau mencabut sesi perangkat pada `worker_portal_sessions`. Request presensi publik selanjutnya memakai worker ID dan token sesi portal. Tautan personal lama bukan mekanisme autentikasi aktif. Check-In/Check-Out/pengajuan dijalankan dalam transaksi dan event publik dipancarkan sesudah commit.
 
 ### State frontend
 
@@ -169,18 +175,20 @@ Bootstrap database berada di `backend/src/db.js`. Database dibuat bila belum ada
 | `departments` | Nama departemen per tenant; hash ternormalisasi untuk mencegah duplikasi. |
 | `document_types` | Katalog jenis dokumen per tenant; `code` stabil, status aktif, ambang peringatan nullable. |
 | `tenant_document_settings` | Ambang peringatan default perusahaan. |
-| `documents` | Metadata dokumen pekerja, status dan tanggal; file dokumen bukan bagian dari model sekarang. |
+| `documents` | Metadata dokumen pekerja, status/tanggal renewal, relasi supersede dan metadata lampiran; berkas disimpan di storage privat. |
 | `worker_status_history` | Histori transisi status pekerja. |
 | `audit_events` | Audit tenant, snapshot aktor/role, aksi, entitas, deskripsi, timestamp. |
-| `tenant_attendance_settings` | Salt HMAC tenant (tidak dikirim ke browser), flag Anti-Mock Location. |
+| `tenant_attendance_settings` | Salt legacy presensi, hash token tautan perusahaan, ciphertext untuk pemulihan token, dan flag Anti-Mock Location. |
 | `tenant_attendance_locations` | Koordinat/radius dan aktivitas yang diwajibkan berada pada lokasi. |
-| `worker_attendance_links` | Satu link per pekerja, menyimpan hash token dan waktu revoke. |
+| `worker_attendance_links` | Tabel legacy untuk kompatibilitas migrasi; bukan mekanisme autentikasi portal yang aktif. |
+| `worker_portal_sessions` | Sesi UUID perangkat pekerja, token disimpan sebagai hash, waktu terakhir terlihat, dan status revoke. |
+| `worker_portal_enrollment_codes` | Tabel legacy enrollment; tidak dipakai pada verifikasi portal saat ini. |
 | `attendance` | Log harian, waktu, koordinat, tipe, status approval, bukti Dinas dan soft-delete. |
 
 ### Isolasi relasional
 
 - Sebagian besar tabel data menyimpan `tenant_id`.
-- Tabel `documents`, `worker_status_history`, `worker_attendance_links`, dan `attendance` memakai foreign key gabungan `(worker_id, tenant_id)` ke worker agar referensi worker harus dari tenant sama.
+- Tabel `documents`, `worker_status_history`, `worker_attendance_links`, `worker_portal_sessions`, `worker_portal_enrollment_codes`, dan `attendance` memakai foreign key gabungan `(worker_id, tenant_id)` ke worker agar referensi worker harus dari tenant sama.
 - Email user menggunakan unique hash global; email pekerja unik dalam tenant melalui hash tenant-scoped.
 - Log presensi aktif dibatasi satu record per worker/tanggal lewat generated column `active_attendance_date`. Record yang soft-delete menghasilkan nilai `NULL` pada generated column sehingga tanggal dapat memiliki record aktif baru.
 - Sintaks generated column dipilih sesuai produk server: `PERSISTENT` untuk MariaDB dan `STORED` untuk MySQL.
@@ -191,7 +199,7 @@ Pool memakai `dateStrings: true`, big numbers dipertahankan sebagai string. Dash
 
 ### Berkas
 
-Foto profil dan bukti Dinas disimpan sebagai BLOB di MySQL, maksimal 900 KiB setelah pemrosesan. File Excel tidak disimpan. File dokumen HR worker belum diunggah/disimpan sebagai file pada skema ini.
+Foto profil dan bukti Dinas disimpan sebagai BLOB di MySQL, maksimal 900 KiB setelah pemrosesan. Lampiran dokumen JPG/PNG/PDF opsional disimpan dalam storage privat dengan metadata pada tabel `documents`, dibatasi 5 MB dan akses tenant/RBAC. File Excel tidak disimpan.
 
 ## 7. API, Sesi, dan Autentikasi
 
@@ -212,7 +220,7 @@ Kontrak endpoint terperinci tersedia pada [backend/docs/api-contract.md](../back
 | Auth/profile | `/api/auth/login`, `/api/auth/me`, `/api/profile` | Semua role terautentikasi untuk profil sendiri |
 | Dashboard | `GET /api/dashboard` | Semua role |
 | Paket dan kuota | `GET /api/subscription` | Semua role tenant |
-| Pekerja | `GET/POST /api/workers`, `PATCH/DELETE /api/workers/:id` | Read semua; create Admin/HR Staff; destructive Admin |
+| Pekerja | `GET/POST /api/workers`, `PATCH/DELETE /api/workers/:id` | Read semua; create Admin/HR Staff; destructive Admin; DELETE adalah soft-delete |
 | Impor pekerja | `POST /api/admin/workers/import` | Admin |
 | Status pekerja | `PATCH /api/workers/:id/status` | Admin |
 | Dokumen | `GET /api/document-types`, `POST /api/workers/:id/documents` | Read semua; create Admin/HR Staff |
@@ -220,8 +228,9 @@ Kontrak endpoint terperinci tersedia pada [backend/docs/api-contract.md](../back
 | Presensi | `GET /api/attendance`, `GET /api/attendance/month` | Semua role |
 | Approval/status manual | `PATCH /api/attendance/:workerId/approval`, `/status` | Admin |
 | Setting presensi | `/api/admin/attendance-settings`, `/api/admin/attendance-locations` | Admin |
-| Link presensi | `/api/workers/:id/attendance-link` | Create Admin/HR Staff; revoke Admin |
-| Portal pekerja | `/api/public/attendance` | Bearer token link yang valid |
+| Sesi portal | `POST /api/public/portal/verify`, `POST /api/workers/:id/portal-session/reset` | Verifikasi publik; reset Admin/HR Staff |
+| Presensi portal | `/api/public/attendance` | Token sesi pekerja aktif |
+| SEO landing | `GET /`, `/sitemap.xml`, `/robots.txt` | Publik; sitemap hanya URL utama |
 | Audit trail | `GET /api/history` | Admin/HR Staff |
 
 Endpoint data memvalidasi role di backend; menyembunyikan tombol pada React hanya merupakan lapisan UX, bukan kontrol keamanan.
@@ -235,14 +244,14 @@ Endpoint data memvalidasi role di backend; menyembunyikan tombol pada React hany
 | Baca dashboard, pekerja, dokumen, presensi | Ya | Ya | Ya |
 | Buat pekerja | Ya | Ya | Tidak |
 | Impor pekerja masal | Ya | Tidak | Tidak |
-| Edit/archive pekerja | Ya | Tidak | Tidak |
+| Edit/hapus pekerja | Ya | Tidak | Tidak |
 | Buat dokumen pekerja | Ya | Ya | Tidak |
 | Archive dokumen | Ya | Tidak | Tidak |
 | Ubah status worker dan jadwalkan nonaktif | Ya | Tidak | Tidak |
 | Baca presensi / matriks | Ya | Ya | Ya |
 | Ubah status manual / approve klaim | Ya | Tidak | Tidak |
-| Buat link pekerja | Ya | Ya | Tidak |
-| Revoke link pekerja | Ya | Tidak | Tidak |
+| Lihat/rotasi tautan perusahaan | Ya | Tidak | Tidak |
+| Reset sesi UUID pekerja | Ya | Ya | Tidak |
 | Semua tab pengaturan tenant | Ya | Tidak | Tidak |
 | Profil Saya dan Keamanan | Ya | Ya | Ya |
 | Baca History | Ya | Ya | Tidak |
@@ -250,7 +259,7 @@ Endpoint data memvalidasi role di backend; menyembunyikan tombol pada React hany
 ### Enforcement di frontend
 
 - Menu dan aksi kondisional berdasarkan `user.role`.
-- Admin saja melihat tombol Edit/Delete dan impor/ekspor Excel.
+- Admin saja melihat tombol Edit/Hapus dan impor/ekspor Excel. Tombol Hapus membuka modal dan mensyaratkan teks `hapus`; endpoint tetap melakukan soft-delete.
 - HR Staff dapat membuat pekerja/dokumen dan membaca data, namun aksi destruktif atau status Admin-only tidak tersedia.
 - Viewer melihat data dalam mode baca.
 - Menu Pengaturan untuk non-Admin hanya menyediakan Profil Saya dan Keamanan.
@@ -283,7 +292,7 @@ active ───────────→ inactive
 
 Transisi yang diizinkan didefinisikan pada `ALLOWED_TRANSITIONS` dalam backend. Hanya Admin dapat mengubah status. Aktivasi dari `preactive` atau `inactive` tidak memerlukan dokumen; nomor pekerja, kuota, dan transisi status tetap divalidasi. Status kelengkapan dokumen hanya untuk pemantauan dan tidak otomatis mengubah status pekerja.
 
-Data pekerja yang dihapus diarsipkan menggunakan `deleted_at`; bukan hard delete. Soft-delete worker juga mencabut link presensi aktif.
+Data pekerja yang dihapus diarsipkan menggunakan `deleted_at`; bukan hard delete. UI memakai label **Hapus** dan modal konfirmasi yang meminta Admin mengetik `hapus`; endpoint mempertahankan data/riwayat terkait, menghilangkan pekerja dari daftar operasional, dan mencabut sesi portal aktif.
 
 ### Persyaratan dokumen
 
@@ -291,20 +300,19 @@ Data pekerja yang dihapus diarsipkan menggunakan `deleted_at`; bukan hard delete
 - Daftar jenis dokumen yang dipantau per pekerja disimpan sebagai JSON pada `workers.required_document_types` (nama kolom dipertahankan demi kompatibilitas); pilihan ini tidak menetapkan prasyarat aktivasi.
 - Catatan dokumen disimpan sebagai riwayat. Catatan terbaru untuk setiap jenis merupakan acuan kelayakan.
 - Status dokumen: `pending`, `valid`, `expired`, `rejected`.
-- `pending` dapat menyimpan target penyelesaian; `valid`/`expired` memakai rentang berlaku; `rejected` tidak memakai tanggal tersebut.
-- Tipe legacy MCU/PKWT/SIM mensyaratkan tanggal akhir untuk lolos kelayakan. Katalog baru tidak otomatis berisi jenis bawaan.
+- `pending` dapat menyimpan target penyelesaian; `valid`/`expired` memakai rentang berlaku; `rejected` memerlukan keterangan dan tidak menyimpan tanggal renewal baru.
+- Tipe legacy MCU/PKWT/SIM memerlukan tanggal akhir untuk ditampilkan lengkap pada evaluasi pemantauan. Hasil kelayakan bersifat informatif; tidak menjadi prasyarat aktivasi. Katalog baru tidak otomatis berisi jenis bawaan.
 - `document_types.warning_threshold_days` nullable; NULL mengikuti default tenant pada `tenant_document_settings`.
-- Dashboard menghitung dokumen yang expired atau masuk threshold efektif per jenis.
+- Dashboard menghitung dokumen pending/rejected yang perlu ditindaklanjuti, dokumen expired, serta dokumen valid yang masuk threshold efektif per jenis. Tindak Lanjut menampilkan pending selalu; rejected sampai tanggal berlaku dokumen lama habis, lalu meminta tinjauan manual HR tanpa inaktivasi otomatis. Baris diringkas dengan jenis, sisa hari/tanggal target atau masa berlaku, serta aksi yang relevan.
 
 ## 10. Presensi, Geofence, dan Approval
 
 ### Link portal
 
-- Link berisi `worker_id` dan token HMAC deterministik.
-- Token dibuat dari tenant, worker, salt tenant, dan `JWT_SECRET`.
-- Database menyimpan hash token; salt mentah tidak pernah dikirim ke browser.
-- Link hanya valid untuk pekerja aktif dengan link tidak dicabut.
-- Rotasi salt membatalkan link aktif; pekerja memerlukan link baru.
+- Perusahaan memakai satu tautan bearer `/portal?company_token=...`; token acak 256-bit disimpan dalam bentuk hash dan ciphertext AES-256-GCM pada `tenant_attendance_settings`.
+- Endpoint verifikasi menerima token perusahaan, nomor pekerja, serta UUID client opsional. UUID perangkat tidak ditampilkan dalam form dan disimpan client di `localStorage`; backend menyimpan hash UUID pada `worker_portal_sessions`.
+- Kunci UUID aktif menolak UUID yang tidak cocok; jika dinonaktifkan, UUID hilang/berbeda dapat dirotasi pada verifikasi. Reset oleh Admin/HR Staff mencabut sesi aktif.
+- Worker nonaktif/soft-deleted dan rotasi token perusahaan mencabut sesi perangkat. Tautan token dapat dipulihkan hanya melalui endpoint Admin yang terproteksi.
 
 ### Data presensi
 
@@ -491,6 +499,8 @@ Vite meneruskan `/api` serta `/socket.io` termasuk upgrade WebSocket ke `http://
 - Sajikan frontend dan API pada origin yang kompatibel atau gunakan reverse proxy yang meneruskan `/api` dan `/socket.io` termasuk upgrade.
 - Pakai HTTPS, `NODE_ENV=production`, secret kuat dan `CORS_ORIGIN` spesifik.
 - Pastikan reverse proxy/load balancer mempertahankan `Upgrade`/`Connection` header dan konfigurasi transport Socket.IO.
+- Frontend Vercel menyediakan `sitemap.xml` dengan hanya URL landing page canonical dan `robots.txt` yang menunjuk ke sitemap; rewrite SPA menangani `/portal` dan `/presensi`. Sitemap tidak mencantumkan halaman autentikasi/tenant. Daftarkan sitemap di Search Console setelah deploy; SEO tidak menjamin peringkat atau tanggal indeks.
+- Metadata SEO ada pada `frontend/index.html`: title “rusakparah.web.id | Platform Operasional HR & Manajemen Timesheet Pekerja”, description, canonical `https://www.rusakparah.web.id/`, Open Graph, dan JSON-LD `SoftwareApplication`. Landing page memakai satu H1 “Kelola timesheet pekerja, lebih terarah.” dengan H2 bagian utama dan H3 fitur.
 - Jangan menyimpan `.env`, password, JWT secret, link token, atau private key di repository.
 
 ## 17. Validasi, Batasan, dan Pertimbangan Produksi
@@ -529,6 +539,7 @@ Paket tenant disimpan pada `tenants.subscription_plan`; bootstrap menambahkan ko
 - `frontend/src/App.jsx` — workspace React, state lokal, event client dan pemrosesan Excel.
 - `frontend/src/Presensi.jsx` — portal pekerja dan validasi geolokasi client.
 - `frontend/src/styles.css` — styling CSS custom.
+- `frontend/index.html`, `frontend/public/sitemap.xml`, `frontend/public/robots.txt` — metadata publik/SEO dan sitemap landing page.
 - `frontend/vite.config.js` — development proxy API/Socket.IO.
 - `frontend/README.md` — prosedur menjalankan frontend dan fitur UI.
 - `workspace/panduan-pengguna.md` — panduan operasional pengguna.

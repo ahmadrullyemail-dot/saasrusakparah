@@ -2,7 +2,7 @@
 
 **rusakparah.web.id**  
 Panduan untuk Admin, HR Staff, dan Viewer  
-Versi dokumen: 1.0 · Diperbarui: 25 Oktober 2026
+Versi dokumen: 1.0 · Diperbarui: 30 Oktober 2026
 
 > **Panduan PDF A4:** Versi siap dibagikan dengan tangkapan layar aplikasi tersedia di [Panduan Pengguna A4](./panduan-pengguna-a4.pdf). Screenshot modul internal memakai data simulasi, bukan data perusahaan. File Markdown ini menjadi referensi teks; placeholder screenshot di bawah bukan bagian dari PDF final.
 
@@ -15,6 +15,7 @@ Versi dokumen: 1.0 · Diperbarui: 25 Oktober 2026
 5. [Ringkasan / Dashboard](#5-ringkasan--dashboard)
 6. [Manajemen pekerja](#6-manajemen-pekerja)
    - [Kuota paket Free](#65-kuota-paket-free)
+   - [Menghapus pekerja](#66-menghapus-pekerja)
 7. [Presensi, matriks bulanan, dan pusat persetujuan](#7-presensi-matriks-bulanan-dan-pusat-persetujuan)
 8. [Portal Presensi Pekerja](#8-portal-presensi-pekerja)
 9. [Dokumen dan masa berlaku](#9-dokumen-dan-masa-berlaku)
@@ -77,7 +78,7 @@ Indikator **Live** menunjukkan koneksi real-time aktif. Jika koneksi terputus, a
 |---|---:|---:|---:|
 | Melihat dashboard dan data operasional tenant | Ya | Ya | Ya |
 | Membuat pekerja dan mencatat dokumen | Ya | Ya | Tidak |
-| Mengubah atau mengarsipkan data pekerja/dokumen | Ya | Tidak | Tidak |
+| Mengedit atau menghapus pekerja / mengarsipkan dokumen | Ya | Tidak | Tidak |
 | Mengubah status siklus pekerja | Ya | Tidak | Tidak |
 | Membuat link presensi pekerja | Ya | Ya | Tidak |
 | Mengelola pengaturan perusahaan | Ya | Tidak | Tidak |
@@ -137,7 +138,7 @@ Fitur impor/ekspor tersedia untuk Admin:
 **Impor**
 
 1. Pilih **Unduh template Excel** untuk memperoleh format kolom yang sesuai.
-2. Isi workbook dengan data pekerja. Gunakan kode jenis dokumen yang berlaku, dipisahkan koma, untuk daftar persyaratan.
+2. Isi workbook dengan data pekerja. Jika ingin mengatur pemantauan dokumen, isi kode jenis dokumen yang berlaku (opsional), dipisahkan koma.
 3. Pilih **Impor Excel**, lalu pilih file `.xlsx`.
 4. File diproses di browser dan tidak disimpan sebagai berkas di server. Aplikasi mengirimkan data baris untuk divalidasi backend.
 5. Tinjau hasil: jumlah berhasil ditambahkan, dilewati, dan baris bermasalah. Buka **Lihat detail baris** untuk rincian.
@@ -153,6 +154,10 @@ Pilih **Ekspor Excel** untuk mengunduh data pekerja yang tersedia dalam daftar s
 Paket **Free** membatasi perusahaan hingga **20 pekerja aktif**. Pemakaian kuota ditampilkan pada Ringkasan dan Data Pekerja, misalnya `12/20 Pekerja`. Pekerja berstatus Offering, Pra-aktif, atau Nonaktif tidak dihitung sebagai pekerja aktif. Saat kuota penuh, penambahan pekerja manual, impor Excel, dan aktivasi pekerja baru ditolak oleh backend. Arsipkan atau nonaktifkan pekerja aktif sesuai prosedur perusahaan untuk menyediakan kembali kuota.
 
 Pada Pengaturan → **Paket Langganan**, Admin dapat melihat paket dan pemakaian kuota. Paket **Pro** dan **Enterprise** berstatus **Segera Hadir** dan tombolnya belum dapat digunakan.
+
+### 6.6 Menghapus pekerja
+
+Hanya Admin yang dapat menghapus pekerja dari daftar operasional. Klik **Hapus** pada baris pekerja atau profil, lalu ketik `hapus` (huruf kecil) pada modal konfirmasi dan pilih **Hapus**. Tindakan ini mengarsipkan pekerja secara soft-delete, bukan menghapus permanen: data dan riwayat terkait tetap tersimpan, pekerja hilang dari daftar operasional, dan sesi portalnya dicabut.
 
 > [Placeholder screenshot — Kontrol pencarian, filter, impor, ekspor, dan aksi pekerja]
 >
@@ -224,11 +229,11 @@ Pemilih tanggal di Operasional Harian tetap tersedia sebagai cara alternatif mem
 
 ## 8. Portal Presensi Pekerja
 
-Portal pekerja dibuka menggunakan tautan personal yang memuat identitas pekerja dan token akses, biasanya berbentuk:
+Portal pekerja dibuka menggunakan satu tautan perusahaan yang dibagikan oleh Admin, biasanya berbentuk:
 
-`/presensi?worker_id=…&token=…`
+`https://www.rusakparah.web.id/portal?company_token=…`
 
-Tautan dibuat HRD dari Data pekerja. Bagikan melalui kanal yang aman; siapa pun yang memiliki tautan dapat mengakses portal pekerja terkait. Jika salt perusahaan dirotasi, semua link lama tidak berlaku dan HRD perlu membuat serta membagikan tautan baru.
+Pekerja memasukkan nomor pekerja pada halaman verifikasi awal. UUID perangkat tidak ditampilkan; portal mengirim UUID yang tersimpan di browser secara otomatis. Setelah nomor pekerja aktif diverifikasi, UUID baru dapat diterbitkan dan disimpan pada browser. Jika Kunci UUID pekerja aktif, UUID berbeda ditolak; minta Admin/HR Staff mereset sesi bila perangkat perlu didaftarkan ulang. Saat Kunci UUID nonaktif, UUID yang hilang/berbeda dapat diganti otomatis, tetapi pengaturan ini mengurangi perlindungan terhadap pengambilalihan akun. Admin dapat menyalin tautan perusahaan kapan saja dari menu Presensi. Bagikan tautan melalui kanal internal yang aman; rotasi tautan akan membatalkan tautan lama dan sesi portal.
 
 ### 8.1 Check-In dan Check-Out
 
@@ -266,7 +271,9 @@ Pencatatan dokumen menyesuaikan status:
 - **Valid/Kedaluwarsa** — mencatat rentang tanggal berlaku.
 - **Ditolak** — ditampilkan tanpa tanggal berlaku.
 
-Catatan terbaru per jenis digunakan untuk menampilkan status pemantauan. Dokumen yang belum ada, tidak valid, atau kedaluwarsa tidak menghalangi aktivasi pekerja. Dokumen dapat dicatat kapan saja; dashboard dan daftar tindak lanjut selalu menampilkan status menunggu pemeriksaan, serta status ditolak sampai dokumen kedaluwarsa dan HR meninjau status pekerja. Kedaluwarsa setelah penolakan tidak menonaktifkan pekerja secara otomatis. Dokumen valid mengikuti ambang peringatan efektif per jenis dan tetap ditampilkan setelah kedaluwarsa.
+Catatan terbaru per jenis digunakan untuk menampilkan status pemantauan. Dokumen yang belum ada, tidak valid, atau kedaluwarsa tidak menghalangi aktivasi pekerja. Dokumen dapat dicatat kapan saja.
+
+Widget **Tindak Lanjut Dokumen → Masa berlaku** merangkum setiap baris agar mudah dipindai, misalnya **MCU · 28 hari lagi → Menunggu · target selesai 11/10/2026**, disertai tombol aksi. Status menunggu pemeriksaan selalu muncul sampai diperbarui. Status ditolak tetap tampil sampai tanggal berlaku dokumen lama habis; setelah itu HR diminta meninjau status pekerja, bukan otomatis menonaktifkannya. Dokumen valid yang mendekati ambang menampilkan sisa hari; dokumen kedaluwarsa tetap tampil. Tombol **Proses**, **Perpanjang**, atau **Tinjau** mengikuti status dokumen dan mengarahkan ke tindakan yang sesuai.
 
 > [Placeholder screenshot — Profil pekerja dan panel dokumen]
 >
@@ -291,9 +298,9 @@ Pengaturan spesifik jenis dokumen mengalahkan nilai default perusahaan. Perubaha
 
 ### 10.3 Pengaturan Presensi
 
-Admin membuka tab **Pengaturan Presensi** untuk mengaktifkan atau menonaktifkan switch **Anti-Mock Location**, mengelola lokasi/geofence, serta membuat atau merotasi salt tautan presensi.
+Admin membuka tab **Pengaturan Presensi** untuk mengaktifkan atau menonaktifkan switch **Anti-Mock Location**, mengelola lokasi/geofence, serta membuat atau merotasi **Tautan Portal Perusahaan**.
 
-> **Perhatian:** Rotasi salt membatalkan semua link pekerja yang sudah dibagikan. Siapkan distribusi tautan pengganti sebelum melakukan rotasi.
+> **Perhatian:** Rotasi tautan membatalkan tautan perusahaan sebelumnya dan sesi portal perangkat aktif. Bagikan tautan baru melalui kanal internal yang aman.
 
 ### 10.4 Tema aplikasi
 
@@ -328,7 +335,8 @@ Viewer tidak memiliki akses ke halaman maupun endpoint riwayat aktivitas.
 | Anti-Mock Location menolak presensi | Aktifkan lokasi presisi, nonaktifkan aplikasi lokasi simulasi, dan coba kembali dengan sinyal GPS yang lebih baik. |
 | Pengajuan tidak muncul pada Pusat Persetujuan | Pastikan bulan yang dipilih sesuai dengan tanggal pengajuan dan koneksi aplikasi aktif. |
 | Pekerja tidak dapat diaktifkan | Periksa transisi status, nomor pekerja, dan kuota paket. Dokumen tidak menjadi syarat aktivasi. |
-| Link pekerja tidak berlaku | Admin perlu memeriksa status aktif pekerja dan menerbitkan ulang link, khususnya setelah rotasi salt. |
+| Tidak bisa menghapus pekerja | Pastikan role Admin, lalu ketik `hapus` dengan huruf kecil persis pada modal konfirmasi. |
+| Tautan portal tidak berlaku | Pastikan tautan perusahaan terbaru digunakan dan pekerja berstatus aktif. Jika UUID perangkat tidak cocok, minta Admin/HR Staff mereset sesi perangkat. |
 | Indikator Live tidak tersambung | Tunggu proses reconnect, periksa koneksi jaringan, lalu muat ulang aplikasi jika tetap tidak tersambung. Perubahan juga akan diperbarui melalui fallback berkala. |
 | Impor Excel menandai baris bermasalah | Periksa format kolom dari template, nilai wajib, format tanggal, kode jenis dokumen, serta duplikasi nama/NIK/email. |
 

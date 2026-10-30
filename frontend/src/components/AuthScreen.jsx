@@ -165,6 +165,16 @@ export function AuthScreen({ onAuthenticated, initialError }) {
         </div>
         <div className="changelog-list">
           <article className="changelog-release">
+            <div className="changelog-release-meta"><span className="changelog-version">PEMBARUAN PRODUK</span><time dateTime="2026-10-30">30 Oktober 2026</time></div>
+            <h3>Tindak lanjut HR lebih ringkas dan terarah</h3>
+            <ul>
+              <li>Daftar tindak lanjut dokumen merangkum sisa masa berlaku, target pemeriksaan, dan aksi yang sesuai status.</li>
+              <li>Status menunggu pemeriksaan dan ditolak tetap terlihat untuk membantu HR meninjau dokumen serta status pekerja.</li>
+              <li>Aksi Hapus pekerja kini memakai modal konfirmasi dengan verifikasi ketik; data tetap diarsipkan, bukan dihapus permanen.</li>
+              <li>Landing page dilengkapi metadata SEO, schema SoftwareApplication, robots.txt, dan sitemap halaman utama.</li>
+            </ul>
+          </article>
+          <article className="changelog-release">
             <div className="changelog-release-meta"><span className="changelog-version">PEMBARUAN UI</span><time dateTime="2026-10-26">26 Oktober 2026</time></div>
             <h3>Pengalaman kerja lebih jelas dan konsisten</h3>
             <ul>

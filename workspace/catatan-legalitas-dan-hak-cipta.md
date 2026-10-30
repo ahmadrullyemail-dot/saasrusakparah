@@ -17,6 +17,8 @@ Catatan ini menjadi daftar perhatian awal sebelum aplikasi dipublikasikan, didis
 - Pertahankan pilihan lisensi dan copyright notice paket lain sesuai syaratnya. Contoh yang terdeteksi antara lain MIT/BSD/ISC; JSZip menyatakan pilihan MIT atau GPL-3.0-or-later, sementara LightningCSS menyatakan MPL-2.0.
 - Pertahankan atribusi OpenStreetMap dan CARTO pada peta, dan tinjau syarat, batas penggunaan, atribusi, serta konfigurasi API key penyedia basemap.
 - Pastikan asal dan izin penggunaan aset yang masuk repository, termasuk gambar logo di `backend/uploads/company-logos/`, terdokumentasi. Jangan menyimpan aset milik klien ke repository tanpa izin dan kebutuhan yang jelas.
+- Pastikan penggunaan nama/brand dan domain `rusakparah.web.id` telah diotorisasi. Metadata SEO, sitemap, dan schema terstruktur harus menggambarkan fitur yang benar; metadata tersebut bukan bukti kepemilikan atau endorsement pihak ketiga.
+- Sitemap publik hanya mencantumkan landing page utama (`https://www.rusakparah.web.id/`); jangan memasukkan URL portal pekerja, endpoint API, atau halaman aplikasi tenant yang berpotensi memuat konteks privat.
 
 ## Data pekerja dan kewajiban operasional
 
@@ -31,6 +33,6 @@ Catatan ini menjadi daftar perhatian awal sebelum aplikasi dipublikasikan, didis
 - [ ] Tinjau Hippocratic-2.1 dan selesaikan verifikasi lisensi `buffers@0.1.1`.
 - [ ] Hasilkan SBOM dan berkas `THIRD-PARTY-NOTICES`; pastikan pemberitahuan ikut tersedia dalam bentuk distribusi frontend/backend yang relevan.
 - [ ] Verifikasi atribusi serta syarat layanan CARTO/OpenStreetMap dan hak semua aset gambar/font/ikon.
+- [ ] Verifikasi hak penggunaan brand/domain dan pastikan sitemap/schema hanya memuat informasi publik yang akurat.
 - [ ] Tetapkan dokumen privasi, retensi, keamanan, serta perjanjian pengolahan data untuk data pekerja.
 - [ ] Minta tinjauan penasihat hukum pada yurisdiksi operasional sebelum peluncuran atau penjualan.
-

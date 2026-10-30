@@ -8,14 +8,14 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 
 - [x] **Siapkan React + Vite** — Kerangka aplikasi, proxy API untuk pengembangan, dan layout responsif.
 - [x] **Bangun autentikasi perusahaan** — Form registrasi perusahaan/login yang memakai sesi cookie HttpOnly dari backend.
-- [x] **Bangun dashboard status worker** — Ringkasan offering, pra-aktif, aktif, nonaktif, serta jumlah dokumen yang segera kedaluwarsa; widget Tindak Lanjut Dokumen menampilkan hingga lima dokumen terdekat dengan nama pekerja, ambang efektif per jenis, tanggal berakhir, dan tautan ke profil/dokumen. Widget Pusat Persetujuan menampilkan jumlah klaim presensi pending dan tautan ke panel presensi.
+- [x] **Bangun dashboard status worker** — Ringkasan offering, pra-aktif, aktif, nonaktif, dokumen pending/rejected yang perlu ditindaklanjuti, serta dokumen mendekati/kedaluwarsa. Widget Tindak Lanjut Dokumen menampilkan hingga lima item prioritas secara ringkas (jenis, sisa hari/target selesai/masa berlaku, dan aksi Proses/Perpanjang/Tinjau). Widget Pusat Persetujuan menampilkan jumlah klaim presensi pending dan tautan ke panel presensi.
 - [x] **Bangun riwayat aktivitas** — Feed audit terbaru tenant untuk Admin/HR Staff dengan aktor, role, waktu, aksi, dan ringkasan perubahan.
 - [x] **Bangun daftar dan formulir pekerja** — Filter status serta pencatatan pekerja setelah offering; jenis dokumen untuk pemantauan bersifat opsional dan dapat dilengkapi kemudian.
-- [x] **Tambah impor/ekspor dan aksi Admin** — Impor Excel diproses hanya di browser, ekspor `.xlsx`, duplikasi nama/NIK dilewati, edit/delete hanya untuk Admin.
+- [x] **Tambah impor/ekspor dan aksi Admin** — Impor Excel diproses hanya di browser, ekspor `.xlsx`, duplikasi nama/NIK dilewati, edit/hapus hanya untuk Admin; aksi Hapus pekerja meminta konfirmasi modal dengan mengetik `hapus` dan tetap menjalankan soft-delete.
 - [x] **Tambah tanggal efektif nonaktif** — Admin dapat menjadwalkan perubahan status dan melihat tanggal jadwal pada daftar pekerja.
 - [x] **Tambah pencarian profil pekerja** — Filter daftar pekerja dan pemilih profil cepat pada halaman Dokumen.
 - [x] **Bangun pemantauan dokumen** — Catat jenis/status/tanggal berlaku MCU, PKWT, sertifikasi, dan SIM; tampilkan kelayakan dan masa berlaku.
-- [x] **Bangun tindakan status manual** — Pra-aktif, aktif, nonaktif, dan reaktivasi sesuai kelayakan backend.
+- [x] **Bangun tindakan status manual** — Pra-aktif, aktif, nonaktif, dan reaktivasi dengan validasi nomor pekerja, kuota, serta transisi backend; dokumen tidak menjadi syarat aktivasi.
 - [x] **Bangun Pengaturan akun** — Profil, unggah foto JPG/PNG yang dikompresi otomatis hingga 900 KiB, ubah password, dan manajemen user khusus Admin dalam tenant aktif.
 - [x] **Bangun Pengaturan Dokumen** — Admin mengelola jenis dokumen; modal pekerja dan formulir pencatatan memakai opsi aktif dari backend.
 - [x] **Verifikasi build produksi** — `npm run build` berhasil setelah tooling diperbarui.
@@ -38,7 +38,8 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [x] **Tambahkan Kunci UUID per pekerja** — Admin/HR Staff dapat mengganti switch dan mereset UUID langsung pada setiap baris tabel Presensi; mode nonaktif merotasi sesi saat UUID klien hilang/berbeda untuk pemulihan `localStorage` iOS.
 - [x] **Kelola geofence dan persetujuan presensi** — Peta Leaflet lokasi/radius/checkbox aktivitas, pengajuan Dinas dengan bukti gambar, serta tindakan persetujuan HR di rekap.
 - [x] **Tambah Anti-Mock Location best-effort** — Switch Admin dan pemeriksaan mock flag, akurasi, serta kecepatan di portal; batas deteksi browser dijelaskan pada UI.
-- [x] **Tambah alur perpanjangan dokumen** — Modal menerima status menunggu pemeriksaan (target selesai), valid (tanggal mulai/akhir), atau ditolak (keterangan wajib); lampiran JPG/PNG/PDF bersifat opsional hingga 5 MB. Dokumen pending selalu masuk tindak lanjut; penolakan tetap ditampilkan sampai HR meninjau status pekerja setelah masa berlaku dokumen habis. Lampiran opsional juga tersedia saat mencatat dokumen baru.
+- [x] **Tambah alur perpanjangan dokumen** — Modal menerima status menunggu pemeriksaan (target selesai), valid (tanggal mulai/akhir), atau ditolak (keterangan wajib); lampiran JPG/PNG/PDF bersifat opsional hingga 5 MB. Dokumen pending selalu masuk tindak lanjut; penolakan tetap ditampilkan sampai tanggal berlaku dokumen lama habis, lalu meminta tinjauan manual HR tanpa penonaktifan otomatis. Baris tindak lanjut diringkas dan menyediakan aksi sesuai status.
+- [x] **Optimalkan SEO landing page** — Title, description, canonical, Open Graph, schema `SoftwareApplication`, satu H1 yang ditentukan, serta `robots.txt` dan `sitemap.xml` yang hanya mencantumkan landing page utama.
 - [ ] **Tambah pratinjau dan kebijakan lifecycle berkas** — Tetapkan pratinjau aman, enkripsi at-rest, dan retensi untuk lampiran dokumen.
 - [ ] **Tambah pengingat dan filter masa berlaku** — Setelah aturan waktu tindak lanjut disepakati.
 - [ ] **Tambah undangan dan izin terperinci** — Lengkapi manajemen MVP dengan proses undangan dan matriks izin yang lebih granular.

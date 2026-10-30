@@ -16,7 +16,7 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [x] **Jadwalkan penonaktifan pekerja** — Simpan tanggal efektif per pekerja dan proses jadwal jatuh tempo saat startup/berkala secara idempotent, catat riwayat, dan cabut tautan presensi.
 - [x] **Catat audit trail tenant** — Simpan aktor/waktu/role/aksi dan ringkasan perubahan penting; endpoint riwayat dibatasi tenant dan role Admin/HR Staff, dengan pagination batas jumlah terbaru.
 - [x] **Amankan impor pekerja masal** — Endpoint khusus Admin menerima JSON yang sudah diproses browser, memvalidasi hingga 500 record dan melewati duplikasi nama/NIK/email.
-- [x] **Edit data pekerja sebagai Admin** — PATCH tenant-scoped memvalidasi field, email unik, dan pilihan dokumen yang dipantau; soft-delete tetap dipakai untuk penghapusan.
+- [x] **Edit dan hapus data pekerja sebagai Admin** — PATCH tenant-scoped memvalidasi field, email unik, dan pilihan dokumen yang dipantau; endpoint DELETE melakukan soft-delete, mempertahankan relasi/riwayat, dan mencabut sesi portal.
 - [x] **Batasi penyimpanan data MCU** — Simpan metadata dan status dokumen saja, bukan hasil medis rinci.
 - [x] **Bangun profil dan keamanan akun** — Edit profil, unggah foto JPG/PNG tenant-scoped (signature divalidasi, batas 900 KiB agar kompatibel dengan `max_allowed_packet` MariaDB lama), ubah password terverifikasi, hash bcrypt, serta pencabutan sesi.
 - [x] **Bangun manajemen user tenant** — Admin dapat membuat user, mengubah role/status, dan mereset password dengan pembatasan tenant serta proteksi admin terakhir.
@@ -31,10 +31,10 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 
 - [x] **Terapkan paket dan kuota pekerja** — Paket Free menjadi default tenant dan membatasi 20 pekerja berstatus aktif yang tidak diarsipkan. API subscription menyajikan paket/pemakaian; backend menolak penambahan manual/impor saat kuota sudah penuh dan menolak aktivasi yang melampaui kuota.
 - [x] **Tambahkan sinkronisasi real-time tenant** — Socket.IO berjalan pada HTTP server Express, memvalidasi sesi cookie dan tenant dari database, mengirim event metadata setelah perubahan berhasil, serta memeriksa validitas sesi secara berkala.
-- [x] **Bangun presensi pekerja** — Salt tenant dan link HMAC statis, validasi worker aktif/tenant, check-in/out dengan geolokasi tervalidasi, status izin/sakit/tidak hadir, dan rekap HRD per tanggal.
+- [x] **Bangun presensi pekerja** — Satu token portal perusahaan dan verifikasi worker aktif menggunakan nomor pekerja/UUID sesi, check-in/out dengan geolokasi tervalidasi, status izin/sakit/tidak hadir, dan rekap HRD per tanggal.
 - [x] **Tambahkan geofence dan approval presensi** — Lokasi tenant, aturan aktivitas/radius dengan validasi Haversine server-side, pengajuan Off/Izin/Cuti/Sakit, bukti Dinas JPG/PNG di MySQL, dan persetujuan HR.
 - [x] **Tambahkan Anti-Mock Location best-effort** — Preferensi tenant Admin, validasi sinyal mock/akurasi/kecepatan request dan pemeriksaan lompatan lokasi terhadap riwayat; bukan GPS attestation dan perlu aplikasi native untuk jaminan kuat.
-- [x] **Tambahkan perpanjangan dokumen** — Admin/HR Staff dapat mencatat pembaruan pending (target selesai), valid (rentang tanggal), atau rejected (keterangan wajib), dengan lampiran JPG/PNG/PDF opsional maksimum 5 MB pada dokumen baru maupun renewal. Berkas disimpan privat, dibatasi tenant/RBAC, riwayat dipertahankan, dan hanya dokumen terkini memengaruhi kelayakan/peringatan.
+- [x] **Tambahkan perpanjangan dokumen** — Admin/HR Staff dapat mencatat pembaruan pending (target selesai), valid (rentang tanggal), atau rejected (keterangan wajib), dengan lampiran JPG/PNG/PDF opsional maksimum 5 MB pada dokumen baru maupun renewal. Berkas disimpan privat, dibatasi tenant/RBAC, riwayat dipertahankan; record aktif menjadi acuan kelayakan dan dashboard menghitung pending/rejected untuk tindak lanjut selain peringatan masa berlaku.
 - [ ] **Tinjau hardening storage dokumen** — Tetapkan enkripsi at-rest, volume persisten, backup, dan retensi lampiran sebelum produksi.
 - [ ] **Tambah pengingat masa berlaku** — Implementasikan setelah ambang waktu, penerima, dan kanal notifikasi disepakati.
 - [ ] **Tambah aturan dokumen berdasarkan posisi/client** — Kelola template pemantauan dokumen setelah variasi per client dan posisi dikonfirmasi.
