@@ -38,7 +38,7 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [x] **Tambahkan Kunci UUID per pekerja** — Admin/HR Staff dapat mengganti switch dan mereset UUID langsung pada setiap baris tabel Presensi; mode nonaktif merotasi sesi saat UUID klien hilang/berbeda untuk pemulihan `localStorage` iOS.
 - [x] **Kelola geofence dan persetujuan presensi** — Peta Leaflet lokasi/radius/checkbox aktivitas, pengajuan Dinas dengan bukti gambar, serta tindakan persetujuan HR di rekap.
 - [x] **Tambah Anti-Mock Location best-effort** — Switch Admin dan pemeriksaan mock flag, akurasi, serta kecepatan di portal; batas deteksi browser dijelaskan pada UI.
-- [x] **Tambah perpanjangan dan akses lampiran dokumen** — Widget Tindak Lanjut dan riwayat dokumen menyediakan form tanggal baru, berkas JPG/PNG, catatan opsional, serta tautan lampiran khusus Admin/HR Staff; data dan ringkasan diperbarui setelah simpan.
+- [x] **Tambah perpanjangan dan akses lampiran dokumen** — Dokumen yang diperbarui tetap berada di Tindak Lanjut sampai Admin/HR Staff memeriksa lampiran dan mengaktifkannya; widget dan ringkasan diperbarui setelah perubahan status.
 - [ ] **Tambah pengingat dan filter masa berlaku** — Setelah aturan waktu tindak lanjut disepakati.
 - [ ] **Tambah undangan dan izin terperinci** — Lengkapi manajemen MVP dengan proses undangan dan matriks izin yang lebih granular.
 - [ ] **Tambah perubahan persyaratan per posisi/client** — Ikuti konfigurasi persyaratan yang disepakati.

@@ -1109,6 +1109,24 @@ function WorkspaceApp() {
     }
   }
 
+  async function activateDocumentRenewal(workerId, documentId) {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api(
+        `/workers/${encodeURIComponent(workerId)}/documents/${encodeURIComponent(documentId)}/activate-renewal`,
+        { method: 'POST' }
+      );
+      await Promise.all([refreshWorkers(), refreshDashboard()]);
+      setNotice('Dokumen telah diperiksa dan diaktifkan.');
+    } catch (requestError) {
+      showError(requestError);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function archiveWorker(workerId) {
     if (user.role !== 'admin' || !window.confirm('Arsipkan pekerja ini? Data dan riwayat terkait tetap disimpan, sesi portal perangkat akan dicabut.')) return;
     setBusy(true);
@@ -1265,6 +1283,7 @@ function WorkspaceApp() {
       .reverse()
       .map((document) => [document.type, document])).values()]
       .filter((document) => {
+        if (document.status === 'pending') return Boolean(document.valid_until);
         if (!document.valid_until || !['valid', 'expired'].includes(document.status)) return false;
         if (document.status === 'expired') return true;
         const threshold = documentTypes.find((type) => type.code === document.type)?.warning_threshold_days
@@ -1647,7 +1666,7 @@ function WorkspaceApp() {
               <div>
                 <p className="eyebrow">TINDAK LANJUT DOKUMEN</p>
                 <h3 id="dashboard-documents-heading">Masa berlaku</h3>
-                <p className="muted">Dokumen kedaluwarsa atau memasuki ambang peringatan perusahaan.</p>
+                <p className="muted">Dokumen kedaluwarsa, mendekati batas berlaku, atau menunggu pemeriksaan HR.</p>
               </div>
               <div className="dashboard-document-heading-actions">
                 <span className={`count-pill ${expiringDocuments.length ? 'pending-count' : ''}`}>
@@ -1663,6 +1682,7 @@ function WorkspaceApp() {
                 {expiringDocuments.slice(0, 5).map((document) => {
                   const warningStartDate = summary?.document_warning_start_date || localDateString();
                   const expired = document.status === 'expired' || document.valid_until < warningStartDate;
+                  const pendingReview = document.status === 'pending';
                   return (
                     <li key={`${document.worker_id}-${document.id}`}>
                       <div className="dashboard-document-row">
@@ -1679,7 +1699,11 @@ function WorkspaceApp() {
                               <span className="uppercase-text">{documentTypeName(document.type, documentTypes)}</span>
                               {' · '}
                               <span className={expired ? 'dashboard-document-expired' : 'dashboard-document-upcoming'}>
-                                {expired ? 'Kedaluwarsa' : `Segera kedaluwarsa · ambang ${document.warning_threshold_days} hari`}
+                                {pendingReview
+                                  ? 'Menunggu pemeriksaan HR'
+                                  : expired
+                                    ? 'Kedaluwarsa'
+                                    : `Segera kedaluwarsa · ambang ${document.warning_threshold_days} hari`}
                               </span>
                             </small>
                           </span>
@@ -1689,7 +1713,7 @@ function WorkspaceApp() {
                           </span>
                           <span className="dashboard-document-open"><Icon name="arrowRight" size={16} /></span>
                         </button>
-                        {['admin', 'hr_manager'].includes(user.role) && (
+                        {['admin', 'hr_manager'].includes(user.role) && !pendingReview && (
                           <button
                             className="button secondary small-action dashboard-renew-button"
                             type="button"
@@ -2000,7 +2024,9 @@ function WorkspaceApp() {
                             <span className="document-icon">{documentTypeName(document.type, documentTypes).slice(0, 1).toUpperCase()}</span>
                             <span><strong className="uppercase-text">{documentTypeName(document.type, documentTypes)}</strong><small>
                               {document.status === 'pending'
-                                ? `Target selesai ${document.target_completion_date || 'belum ditentukan'}`
+                                    ? document.valid_until
+                                      ? `Menunggu pemeriksaan · masa berlaku hingga ${document.valid_until}`
+                                      : `Target selesai ${document.target_completion_date || 'belum ditentukan'}`
                                 : document.status === 'rejected'
                                   ? 'Tanggal tidak berlaku'
                                   : `${document.valid_from || 'Tanggal mulai —'} hingga ${document.valid_until || 'tanpa tanggal akhir'}`}
@@ -2034,6 +2060,21 @@ function WorkspaceApp() {
                                   }}
                                 >
                                   Perpanjang
+                                </button>
+                              )}
+                            {['admin', 'hr_manager'].includes(user.role)
+                              && document.status === 'pending'
+                              && document.valid_until
+                              && document.has_attachment
+                              && selectedProfileWorker.documents.find((candidate) => candidate.type === document.type)?.id === document.id
+                              && (
+                                <button
+                                  className="button primary small-action"
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => activateDocumentRenewal(selectedProfileWorker.id, document.id)}
+                                >
+                                  {busy ? 'Menyimpan…' : 'Aktifkan'}
                                 </button>
                               )}
                             {user.role === 'admin' && <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveDocument(selectedProfileWorker.id, document.id)}>Arsipkan</button>}
@@ -2105,7 +2146,7 @@ function WorkspaceApp() {
                   {expiringDocuments.map((document) => (
                     <div className="expiry-item" key={`${document.id}-${document.worker_id}`}>
                       <span className={`expiry-dot ${document.valid_until < (summary?.document_warning_start_date || localDateString()) ? 'expired' : ''}`} />
-                      <span><strong className="uppercase-text">{document.worker_name}</strong><small><span className="uppercase-text">{documentTypeName(document.type, documentTypes)}</span> · {document.valid_until < (summary?.document_warning_start_date || localDateString()) ? 'Kedaluwarsa' : `Segera kedaluwarsa · ambang ${document.warning_threshold_days} hari`} · berakhir {new Date(`${document.valid_until}T00:00:00`).toLocaleDateString('id-ID')}</small></span>
+                      <span><strong className="uppercase-text">{document.worker_name}</strong>                      <small><span className="uppercase-text">{documentTypeName(document.type, documentTypes)}</span> · {document.status === 'pending' ? 'Menunggu pemeriksaan HR' : document.valid_until < (summary?.document_warning_start_date || localDateString()) ? 'Kedaluwarsa' : `Segera kedaluwarsa · ambang ${document.warning_threshold_days} hari`} · berakhir {new Date(`${document.valid_until}T00:00:00`).toLocaleDateString('id-ID')}</small></span>
                       {['admin', 'hr_manager'].includes(user.role) && (
                         <button
                           className="button secondary small-action"

@@ -14,6 +14,7 @@ const {
   safeLeaveAttachmentName,
   safeDocumentAttachmentName,
   validDocumentRenewalInput,
+  validDocumentRenewalActivation,
   leaveAttachmentStoragePath,
   validDocumentWarningThreshold,
   attendanceMonthRange,
@@ -246,6 +247,14 @@ test('document renewal validates a future expiry date and optional bounded note'
   assert.equal(validDocumentRenewalInput({ valid_until: '2027-03-26', reference_note: 'x'.repeat(501) }, today), false);
   assert.equal(safeDocumentAttachmentName('../../MCU report.exe', 'image/png'), 'MCU_report.png');
   assert.equal(safeDocumentAttachmentName('renewal.jpg', 'image/jpeg'), 'renewal.jpg');
+});
+
+test('only an uploaded renewal awaiting review with a future expiry can be activated', () => {
+  const renewal = { status: 'pending', valid_until: '2027-03-26', has_attachment: 1 };
+  assert.equal(validDocumentRenewalActivation(renewal, '2026-03-26'), true);
+  assert.equal(validDocumentRenewalActivation({ ...renewal, has_attachment: 0 }, '2026-03-26'), false);
+  assert.equal(validDocumentRenewalActivation({ ...renewal, status: 'valid' }, '2026-03-26'), false);
+  assert.equal(validDocumentRenewalActivation({ ...renewal, valid_until: '2026-03-26' }, '2026-03-26'), false);
 });
 
 test('contact and salary validation accepts supported worker details', () => {

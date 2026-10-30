@@ -123,6 +123,14 @@ function validDocumentRenewalInput(input, today = new Date().toISOString().slice
   return note == null || (typeof note === 'string' && note.trim().length <= 500);
 }
 
+function validDocumentRenewalActivation(document, today = new Date().toISOString().slice(0, 10)) {
+  return Boolean(document
+    && document.status === 'pending'
+    && document.has_attachment
+    && validDate(document.valid_until)
+    && document.valid_until > today);
+}
+
 function leaveAttachmentStoragePath(storageKey) {
   if (typeof storageKey !== 'string' || !/^leave-attachments\/[0-9a-f-]{36}\.(jpg|png)$/.test(storageKey)) {
     return null;
@@ -2674,7 +2682,8 @@ app.get('/api/dashboard', asyncRoute(async (req, res) => {
         )
         AND ((d.status = 'valid'
           AND d.valid_until <= DATE_ADD(UTC_DATE(), INTERVAL COALESCE(dt.warning_threshold_days, ?) DAY))
-          OR d.status = 'expired')`,
+          OR d.status = 'expired'
+          OR (d.status = 'pending' AND d.attachment_data IS NOT NULL))`,
     [req.auth.tenantId, warningThresholdDays]
   );
   summary.expiring_documents = Number(expiring[0].total);
@@ -3638,9 +3647,9 @@ app.post(
       );
       const [result] = await connection.execute(
         `INSERT INTO documents (
-           tenant_id, worker_id, \`type\`, status, valid_from, valid_until,
+           tenant_id, worker_id, \`type\`, status, valid_until,
            attachment_data, attachment_mime_type, attachment_file_name, reference_note
-         ) VALUES (?, ?, ?, 'valid', UTC_DATE(), ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
         [
           req.auth.tenantId,
           worker.id,
@@ -3686,6 +3695,79 @@ app.post(
     });
   })
 );
+
+app.post('/api/workers/:id/documents/:documentId/activate-renewal', requireManager, asyncRoute(async (req, res) => {
+  const connection = await pool.getConnection();
+  let document;
+  let worker;
+  try {
+    await connection.beginTransaction();
+    worker = await getWorker(req.auth.tenantId, req.params.id, connection, true);
+    if (!worker) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Worker not found' });
+    }
+    const [rows] = await connection.execute(
+      `SELECT id, \`type\`, status,
+              DATE_FORMAT(valid_until, '%Y-%m-%d') AS valid_until,
+              IF(attachment_data IS NULL, 0, 1) AS has_attachment
+         FROM documents
+        WHERE id = ? AND worker_id = ? AND tenant_id = ? AND deleted_at IS NULL
+        FOR UPDATE`,
+      [req.params.documentId, worker.id, req.auth.tenantId]
+    );
+    document = rows[0];
+    if (!validDocumentRenewalActivation(document)) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Hanya dokumen perpanjangan yang menunggu pemeriksaan dengan tanggal berlaku di masa depan yang dapat diaktifkan.' });
+    }
+    const [latestRows] = await connection.execute(
+      `SELECT id FROM documents
+        WHERE tenant_id = ? AND worker_id = ? AND \`type\` = ? AND deleted_at IS NULL
+        ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+      [req.auth.tenantId, worker.id, document.type]
+    );
+    if (String(latestRows[0]?.id) !== String(document.id)) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Dokumen ini sudah digantikan oleh catatan terbaru.' });
+    }
+    await connection.execute(
+      `UPDATE documents SET status = 'valid', valid_from = UTC_DATE()
+        WHERE id = ? AND tenant_id = ?`,
+      [document.id, req.auth.tenantId]
+    );
+    await connection.commit();
+  } catch (requestError) {
+    await connection.rollback();
+    throw requestError;
+  } finally {
+    connection.release();
+  }
+
+  await recordAudit(req, {
+    action: 'update',
+    entityType: 'document',
+    entityId: document.id,
+    description: `Dokumen ${document.type} pekerja "${worker.full_name}" diperiksa dan diaktifkan hingga ${String(document.valid_until).slice(0, 10)}.`,
+  });
+  const [updatedRows] = await pool.execute(
+    `SELECT id, worker_id, \`type\`, status, valid_from, valid_until, target_completion_date,
+            IF(attachment_data IS NULL, 0, 1) AS has_attachment,
+            attachment_file_name, reference_note, created_at, updated_at
+       FROM documents WHERE id = ? AND tenant_id = ?`,
+    [document.id, req.auth.tenantId]
+  );
+  const updatedDocument = updatedRows[0];
+  res.json({
+    data: {
+      ...updatedDocument,
+      has_attachment: Boolean(updatedDocument.has_attachment),
+      valid_from: updatedDocument.valid_from ? String(updatedDocument.valid_from).slice(0, 10) : null,
+      valid_until: updatedDocument.valid_until ? String(updatedDocument.valid_until).slice(0, 10) : null,
+      target_completion_date: updatedDocument.target_completion_date ? String(updatedDocument.target_completion_date).slice(0, 10) : null,
+    },
+  });
+}));
 
 app.get('/api/workers/:id/documents/:documentId/attachment', requireManager, asyncRoute(async (req, res) => {
   res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -4033,6 +4115,7 @@ module.exports = {
   safeLeaveAttachmentName,
   safeDocumentAttachmentName,
   validDocumentRenewalInput,
+  validDocumentRenewalActivation,
   leaveAttachmentStoragePath,
   validDocumentWarningThreshold,
   attendanceMonthRange,
