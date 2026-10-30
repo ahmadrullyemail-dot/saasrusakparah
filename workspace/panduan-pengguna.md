@@ -2,7 +2,7 @@
 
 **rusakparah.web.id**  
 Panduan untuk Admin, HR Staff, dan Viewer  
-Versi dokumen: 1.0 · Diperbarui: 30 Oktober 2026
+Versi dokumen: 1.1 · Diperbarui: 30 Oktober 2026
 
 > **Panduan PDF A4:** Versi siap dibagikan dengan tangkapan layar aplikasi tersedia di [Panduan Pengguna A4](./panduan-pengguna-a4.pdf). Screenshot modul internal memakai data simulasi, bukan data perusahaan. File Markdown ini menjadi referensi teks; placeholder screenshot di bawah bukan bagian dari PDF final.
 

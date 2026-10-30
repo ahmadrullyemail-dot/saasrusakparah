@@ -97,13 +97,13 @@
   <section class="page cover">
     <div class="cover-content">
       <div class="brand"><span class="brand-mark">R</span><span>rusakparah.web.id<br><small style="font-size:8pt;font-weight:500;color:#d7def7">HRD Management</small></span></div>
-      <p class="cover-kicker">PANDUAN PENGGUNA · EDISI 1.0</p>
+      <p class="cover-kicker">PANDUAN PENGGUNA · EDISI 1.1</p>
       <h1>Ruang kerja HR<br>yang lebih terarah.</h1>
       <p class="cover-subtitle">Panduan praktis untuk mengelola perjalanan pekerja, dokumen ketenagakerjaan, dan presensi dalam satu aplikasi.</p>
       <div class="cover-flow"><span>Offering</span><b>→</b><span>Pra-aktif</span><b>→</b><span>Aktif</span><b>→</b><span>Nonaktif</span></div>
-      <p class="cover-note">Untuk Admin, HR Staff, Viewer, dan pekerja yang menggunakan portal presensi. Panduan ini mengikuti fungsi aplikasi yang tersedia per 27 Oktober 2026.</p>
+      <p class="cover-note">Untuk Admin, HR Staff, Viewer, dan pekerja yang menggunakan portal presensi. Panduan ini merangkum fungsi yang tersedia per 30 Oktober 2026.</p>
     </div>
-    <div class="cover-footer"><span>Dokumentasi pengguna</span><span>27 Oktober 2026</span></div>
+    <div class="cover-footer"><span>Dokumentasi pengguna</span><span>30 Oktober 2026</span></div>
   </section>
 
   <section class="page">
@@ -122,14 +122,14 @@
         <div class="callout warn"><b>Lupa kata sandi?</b> Pilih tautan pemulihan, masukkan email terdaftar, lalu ikuti tautan dari email. Tautan berlaku 30 menit. Pengiriman harus diaktifkan oleh operator melalui konfigurasi email.</div>
         <h3>Penyiapan awal Admin</h3>
         <ol class="tight">
-          <li>Tambahkan jenis dokumen dan atur ambang pengingat.</li>
-          <li>Konfigurasikan lokasi presensi dan keamanan tautan pekerja.</li>
-          <li>Undang/buat akun sesuai role yang diperlukan.</li>
-          <li>Catat pekerja dan bagikan tautan presensi secara aman.</li>
+          <li>Atur katalog dan ambang pemantauan dokumen (opsional).</li>
+          <li>Siapkan lokasi presensi dan buat tautan portal perusahaan.</li>
+          <li>Buat akun Admin, HR Staff, dan Viewer sesuai kebutuhan.</li>
+          <li>Catat pekerja; dokumen boleh dilengkapi kemudian.</li>
         </ol>
       </div>
       <figure class="image-frame compact">
-        <img src="./panduan-06-masuk.png" alt="Form masuk aplikasi">
+        <img src="./panduan%20old/panduan-06-masuk.png" alt="Form masuk aplikasi">
         <figcaption>Form masuk. Gambar menunjukkan antarmuka aplikasi; data akun tidak diisi.</figcaption>
       </figure>
     </div>
@@ -138,24 +138,24 @@
       <div class="card soft"><h3>Navigasi utama</h3><p>Ringkasan · Data pekerja · Dokumen & masa berlaku · Presensi · Riwayat aktivitas · Pengaturan. Riwayat hanya tersedia untuk Admin dan HR Staff.</p></div>
       <div class="card soft"><h3>Changelog</h3><p>Landing page memiliki tautan <b>Changelog</b> untuk melihat pembaruan aplikasi. Isi dashboard operasional berasal dari data tenant yang sedang masuk, bukan angka ilustrasi landing page.</p></div>
     </div>
-    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>02 / 09</strong></div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>02 / 10</strong></div>
   </section>
 
   <section class="page">
     <div class="topline"><span>02 · Ringkasan</span><strong>Dashboard HRD</strong></div>
     <p class="eyebrow">GAMBARAN OPERASIONAL</p>
     <h2>Prioritaskan hal yang perlu ditindaklanjuti</h2>
-    <p class="lead">Ringkasan menampilkan status pekerja, dokumen mendekati atau melewati masa berlaku, serta antrean klaim presensi. Klik kartu untuk membuka daftar atau modul terkait.</p>
-    <figure class="image-frame">
-      <img src="./panduan-01-ringkasan.png" alt="Dashboard Ringkasan dengan data simulasi">
-      <figcaption>Ringkasan aplikasi. Semua nama dan angka pada tangkapan layar adalah data simulasi, bukan data perusahaan.</figcaption>
+    <p class="lead">Ringkasan menampilkan status pekerja, antrean dokumen, klaim presensi, dan kuota. Kartu dapat diklik untuk membuka daftar terkait.</p>
+    <figure class="image-frame compact">
+      <img src="./panduan%20old/panduan-01-ringkasan.png" alt="Dashboard Ringkasan dengan data simulasi">
+      <figcaption>Contoh Ringkasan memakai data simulasi. Status dan jumlah aktual berasal dari tenant yang sedang login.</figcaption>
     </figure>
     <div class="cols">
-      <div class="card"><h3>Kartu status pekerja</h3><p><b>Offering</b>, <b>Pra-aktif</b>, <b>Aktif</b>, dan <b>Nonaktif</b> menunjukkan jumlah pekerja per tahap. Kartu dapat membuka Data pekerja dengan filter status terkait.</p></div>
-      <div class="card"><h3>Tindak lanjut & persetujuan</h3><p><b>Dokumen perlu tindak lanjut</b> menunjukkan dokumen kedaluwarsa/masuk ambang. <b>Klaim presensi pending</b> membuka Pusat Persetujuan. Widget mengambil data dari API tenant.</p></div>
+      <div class="card"><h3>Status & kuota</h3><p>Kartu Offering, Pra-aktif, Aktif, dan Nonaktif membuka daftar pekerja terfilter. Paket Free mencakup hingga 20 pekerja aktif; jumlah tersedia tampil pada kartu kuota.</p></div>
+      <div class="card"><h3>Tindak lanjut</h3><p>Dokumen pending selalu muncul; dokumen ditolak bertahan sampai masa berlaku lama habis. Baris ringkas menunjukkan sisa hari/target dan tombol Proses, Perpanjang, atau Tinjau. Klaim presensi membuka antrean HR.</p></div>
     </div>
-    <div class="callout good"><b>Pembaruan data:</b> perubahan penting dapat menyegarkan tampilan melalui koneksi real-time. Ringkasan juga melakukan pembaruan berkala saat halaman terbuka.</div>
-    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>03 / 09</strong></div>
+    <div class="callout good"><b>Contoh baris:</b> “MCU · 28 hari lagi → Menunggu · target selesai 11/10/2026” lalu tombol <b>Proses</b>. Penolakan tidak otomatis menonaktifkan pekerja; HR meninjau statusnya.</div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>03 / 10</strong></div>
   </section>
 
   <section class="page">
@@ -163,33 +163,34 @@
     <p class="eyebrow">DATA PEKERJA</p>
     <h2>Kelola pekerja dari offering hingga nonaktif</h2>
     <p class="lead">Catat pekerja setelah offering letter diterbitkan, lengkapi persyaratan, dan tinjau statusnya dari satu daftar.</p>
-    <figure class="image-frame">
-      <img src="./panduan-02-data-pekerja.png" alt="Daftar pekerja dengan data simulasi">
-      <figcaption>Daftar pekerja dengan pencarian, filter status, indikator kelayakan, dan kontrol Admin. Data pada gambar fiktif.</figcaption>
+    <figure class="image-frame compact">
+      <img src="./panduan%20old/panduan-02-data-pekerja.png" alt="Daftar pekerja dengan data simulasi">
+      <figcaption>Contoh daftar pekerja dan kontrol baris. Gambar menggunakan data simulasi dan sebagian label aksi mungkin berbeda dari UI terbaru.</figcaption>
     </figure>
     <div class="two-up">
       <div>
         <h3>Tambah dan cari pekerja</h3>
         <ol class="tight">
-          <li>Pilih <b>Tambah Pekerja</b>, isi identitas, kontak, departemen, posisi, kontrak, serta tanggal yang diminta.</li>
-          <li>Pilih jenis dokumen yang ingin dipantau untuk pekerja tersebut (opsional), lalu simpan.</li>
-          <li>Gunakan kolom pencarian dan filter untuk menemukan pekerja berdasarkan nama, NIK, posisi, departemen, atau status.</li>
-          <li>Buka profil pekerja untuk melihat dokumen, kelayakan, dan riwayat status.</li>
+          <li>Pilih <b>Tambah Pekerja</b>, isi identitas, nomor pekerja, kontak, departemen, posisi, dan informasi kerja yang tersedia.</li>
+          <li>Dokumen dan tanggal berlakunya opsional; dapat dicatat atau diperbarui kemudian.</li>
+          <li>Cari dan filter berdasarkan nama, nomor pekerja, posisi, departemen, atau status.</li>
+          <li>Buka profil pekerja untuk melihat data dan riwayat status.</li>
         </ol>
       </div>
       <div>
         <h3>Transisi status</h3>
         <div class="flow">
           <div><strong>Offering</strong><small>Proses setelah offering letter.</small></div>
-          <div><strong>Pra-aktif</strong><small>Dokumen dapat dipantau atau dicatat kemudian.</small></div>
-          <div><strong>Aktif</strong><small>Admin mengaktifkan dengan nomor pekerja dan kuota yang valid.</small></div>
-          <div><strong>Nonaktif</strong><small>Dapat dijadwalkan atau dilakukan sesuai wewenang.</small></div>
+          <div><strong>Pra-aktif</strong><small>Menunggu keputusan aktivasi; dokumen tetap opsional.</small></div>
+          <div><strong>Aktif</strong><small>Admin mengaktifkan dengan nomor pekerja dan kuota yang tersedia.</small></div>
+          <div><strong>Nonaktif</strong><small>Riwayat pekerja tersimpan dan status dapat ditinjau.</small></div>
         </div>
-        <p class="small">Dokumen dapat dicatat kemudian dan kelengkapannya hanya untuk pemantauan. Aktivasi memerlukan transisi status, nomor pekerja, dan kuota yang valid; perubahan status dilakukan Admin.</p>
+        <p class="small">Dokumen tidak menjadi syarat teknis aktivasi. Status pekerja diubah oleh Admin; pemantauan masa berlaku membantu HR meninjau kelanjutan kerja.</p>
       </div>
     </div>
-    <div class="callout warn"><b>Paket Free:</b> dibatasi maksimum 20 pekerja aktif. Admin dapat mengimpor maksimal 500 baris Excel; workbook diproses di browser. Baris duplikat/bermasalah dilaporkan untuk ditinjau.</div>
-    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>04 / 09</strong></div>
+    <div class="callout warn"><b>Tindakan hapus:</b> fungsi lama tetap berupa pengarsipan/soft-delete. Admin mengetik <b>hapus</b> di modal konfirmasi; data tidak dihapus permanen. Akun nonaktif dan nomor pekerja dapat dikelola kembali sesuai aturan duplikasi.</div>
+    <div class="small">Impor Excel mendukung hingga 500 baris per proses. Periksa laporan baris duplikat atau tidak valid sebelum menyimpan hasil.</div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>04 / 10</strong></div>
   </section>
 
   <section class="page">
@@ -197,17 +198,18 @@
     <p class="eyebrow">DOKUMEN & MASA BERLAKU</p>
     <h2>Cari pekerja, cek kelayakan, tindak lanjuti dokumen</h2>
     <p class="lead">Gunakan profil dokumen untuk melihat persyaratan dan riwayat. Ambang pemantauan bersumber dari pengaturan perusahaan atau override per jenis dokumen.</p>
-    <figure class="image-frame">
-      <img src="./panduan-03-dokumen.png" alt="Panel dokumen pekerja dengan data simulasi">
-      <figcaption>Panel dokumen berisi hasil pencarian, ringkasan kelayakan, formulir pencatatan, dan daftar masa berlaku. Data fiktif.</figcaption>
+    <figure class="image-frame compact">
+      <img src="./panduan%20old/panduan-03-dokumen.png" alt="Panel dokumen pekerja dengan data simulasi">
+      <figcaption>Ilustrasi panel dokumen dengan data fiktif; dokumen bukan syarat aktivasi pekerja.</figcaption>
     </figure>
     <div class="cols">
-      <div class="card"><h3>Alur pencarian</h3><ol class="tight"><li>Ketik minimal <b>3 karakter</b> pada pencarian pekerja.</li><li>Pilih pekerja dari hasil yang cocok.</li><li>Tinjau syarat wajib dan status kelayakan.</li><li>Untuk mencatat dokumen, pilih jenis dan status, lalu lengkapi tanggal sesuai status.</li></ol></div>
-      <div class="card"><h3>Status dokumen</h3><ul class="tight"><li><span class="badge amber">Menunggu</span> selalu muncul sampai pemeriksaan selesai dan dapat memakai tanggal target.</li><li><span class="badge green">Valid</span> mencatat rentang berlaku.</li><li><span class="badge red">Kedaluwarsa</span> tetap muncul untuk ditindaklanjuti.</li><li><span class="badge">Ditolak</span> tetap muncul hingga dokumen kedaluwarsa; HR meninjau status pekerja dan penonaktifan tidak otomatis.</li></ul></div>
+      <div class="card"><h3>Catat atau perpanjang</h3><ol class="tight"><li>Cari pekerja dan pilih jenis dokumen, misalnya MCU, PKWT, SIM, atau sertifikasi.</li><li>Pilih <b>Menunggu pemeriksaan</b>, <b>Perpanjang</b>, atau <b>Ditolak</b>.</li><li>Untuk Perpanjang, masukkan tanggal mulai dan tanggal berlaku baru. Lampiran boleh ditambahkan, tetapi opsional.</li><li>Untuk Ditolak, isi keterangan penolakan. Periksa kembali tanggal dan simpan.</li></ol></div>
+      <div class="card"><h3>Status & tindak lanjut</h3><ul class="tight"><li><span class="badge amber">Menunggu</span> tetap terlihat sampai pemeriksaan selesai; target selesai ditampilkan.</li><li><span class="badge green">Valid</span> mencatat rentang masa berlaku yang dikonfirmasi.</li><li><span class="badge red">Ditolak</span> tetap terlihat sampai masa berlaku dokumen lama berakhir.</li><li>Setelah kedaluwarsa, HR meninjau status pekerja; penonaktifan <b>tidak otomatis</b>.</li></ul></div>
     </div>
-    <div class="callout danger"><b>Privasi:</b> sistem mencatat metadata, status, dan masa berlaku dokumen; bukan tempat mengunggah dokumen pekerja atau memasukkan hasil medis MCU secara rinci.</div>
-    <p class="small">Admin mengatur ambang default perusahaan 1–365 hari dan dapat memberi nilai khusus per jenis dokumen. Catatan terbaru per jenis menjadi acuan persyaratan.</p>
-    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>05 / 09</strong></div>
+    <div class="callout good"><b>Ringkasan Tindak Lanjut Dokumen</b> menampilkan status singkat, misalnya: “MCU · 28 hari lagi → Menunggu · target selesai 11/10/2026”, beserta tombol aksi untuk membuka proses yang relevan.</div>
+    <div class="callout danger"><b>Privasi:</b> unggah lampiran baru/perpanjangan bersifat opsional. Hindari mengunggah hasil medis rinci atau informasi yang tidak diperlukan; simpan hanya dokumen yang berwenang diproses.</div>
+    <p class="small">Admin mengatur ambang pengingat perusahaan (1–365 hari) dan dapat memberi nilai khusus per jenis dokumen. Aturan ini untuk pemantauan, bukan otomatisasi status pekerja.</p>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>05 / 10</strong></div>
   </section>
 
   <section class="page">
@@ -216,7 +218,7 @@
     <h2>Pantau klaim dan pola kehadiran</h2>
     <p class="lead">Pilih bulan untuk melihat metrik, antrean pengajuan, dan matriks kehadiran. Klik sel tanggal pada matriks untuk menuju operasional harian.</p>
     <figure class="image-frame">
-      <img src="./panduan-04-presensi.png" alt="Panel presensi bulanan dengan data simulasi">
+      <img src="./panduan%20old/panduan-04-presensi.png" alt="Panel presensi bulanan dengan data simulasi">
       <figcaption>Presensi bulanan: metrik, klaim pending, matriks, legenda, dan navigasi periode. Data fiktif.</figcaption>
     </figure>
     <div class="two-up">
@@ -237,39 +239,69 @@
       </div>
     </div>
     <div class="callout warn">Status terlambat hanya ditampilkan jika tersedia dari data. Perhitungan otomatis berbasis jadwal/shift belum termasuk fungsi saat ini.</div>
-    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>06 / 09</strong></div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>06 / 10</strong></div>
   </section>
 
   <section class="page">
-    <div class="topline"><span>06 · Portal pekerja</span><strong>Check-In & Check-Out</strong></div>
-    <p class="eyebrow">PRESENSI PEKERJA</p>
-    <h2>Gunakan tautan personal untuk mencatat kehadiran</h2>
+    <div class="topline"><span>06 · Portal perusahaan</span><strong>Akses pekerja & UUID</strong></div>
+    <p class="eyebrow">TAUTAN PRESENSI PERUSAHAAN</p>
+    <h2>Verifikasi akses pekerja dengan aman</h2>
+    <p class="lead">HR membagikan satu tautan portal perusahaan. Pekerja memasukkan nomor pekerja; browser membaca UUID perangkat secara otomatis tanpa kolom UUID yang terlihat.</p>
+    <div class="two-up">
+      <div>
+        <h3>Masuk dari portal</h3>
+        <ol class="tight">
+          <li>Buka tautan resmi dengan token perusahaan dari HR.</li>
+          <li>Masukkan nomor pekerja terdaftar dan tekan <b>Masuk ke portal</b>.</li>
+          <li>UUID tersimpan/dibuat di browser dan dikirim bersama nomor pekerja untuk verifikasi.</li>
+          <li>Jika perangkat tidak dikenali, minta Admin atau HR Staff memeriksa pengaturan UUID.</li>
+        </ol>
+        <div class="callout warn">Bersihkan data browser atau berpindah perangkat dapat menghilangkan UUID lokal. Gunakan fitur reset atau kebijakan kunci sesuai keputusan perusahaan.</div>
+      </div>
+      <div>
+        <h3>Kelola kunci UUID</h3>
+        <ol class="tight">
+          <li>Buka menu <b>Presensi</b> di Dashboard HR.</li>
+          <li>Di baris pekerja, gunakan switch <b>Kunci UUID</b>. Perubahan disimpan ke server.</li>
+          <li>Dengan kunci aktif, UUID klien harus cocok dengan perangkat terdaftar.</li>
+          <li>Dengan kunci nonaktif, nomor pekerja aktif dapat mendaftarkan/memperbarui UUID di perangkat baru.</li>
+        </ol>
+        <p class="small">Jika perlu mencabut perangkat lama, pilih <b>Reset UUID</b> pada baris yang sama. Setelah reset, pekerja memperoleh UUID baru ketika masuk lagi.</p>
+      </div>
+    </div>
+    <div class="callout danger"><b>Risiko keamanan:</b> saat Kunci UUID nonaktif, siapa pun yang mengetahui nomor pekerja dapat mendaftarkan perangkat. Aktifkan kembali setelah pemulihan perangkat dan bagikan tautan/token portal hanya melalui kanal resmi.</div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>07 / 10</strong></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"><span>07 · Portal pekerja</span><strong>Presensi & layanan mandiri</strong></div>
+    <p class="eyebrow">PORTAL PEKERJA</p>
+    <h2>Catat kehadiran dan kelola pengajuan</h2>
     <div class="portal-grid">
       <figure class="image-frame portal">
-        <img src="./panduan-07-portal-pekerja.png" alt="Portal presensi pekerja dengan data simulasi">
-        <figcaption>Portal presensi pekerja. Identitas dan konteks pada gambar disimulasikan.</figcaption>
+        <img src="./panduan%20old/panduan-07-portal-pekerja.png" alt="Portal presensi pekerja dengan data simulasi">
+        <figcaption>Contoh portal pada perangkat seluler; identitas dan konteks pada gambar disimulasikan.</figcaption>
       </figure>
       <div>
         <h3>Sebelum mulai</h3>
         <ul class="tight">
-          <li>Buka tautan resmi dari HR di browser yang mengizinkan lokasi.</li>
-          <li>Pastikan nama perusahaan dan pekerja benar.</li>
-          <li>Gunakan perangkat dan lokasi yang sesuai kebijakan perusahaan.</li>
+          <li>Pastikan nama perusahaan dan pekerja yang tampil benar.</li>
+          <li>Izinkan akses lokasi saat browser meminta izin.</li>
+          <li>Gunakan perangkat dan lokasi sesuai kebijakan perusahaan.</li>
         </ul>
-        <h3>Check-In / Check-Out</h3>
+        <h3>Timer</h3>
         <ol class="tight">
-          <li>Pilih aktivitas (reguler, Dinas, Off, Izin, Cuti, atau Sakit).</li>
-          <li>Tekan Check-In / Hadir atau ajukan status yang diperlukan.</li>
-          <li>Izinkan akses lokasi saat browser memintanya.</li>
-          <li>Lakukan Check-Out setelah pekerjaan selesai.</li>
+          <li>Pilih aktivitas yang tersedia, misalnya Reguler, Dinas, Off, Izin, Cuti, atau Sakit.</li>
+          <li>Lakukan Check-In/Hadir dan Check-Out sesuai alur yang tampil.</li>
+          <li>Aktivitas Dinas dapat meminta bukti foto dan menunggu persetujuan Admin.</li>
         </ol>
-        <h3>Lokasi & bukti</h3>
-        <p>Aktivitas yang diwajibkan geofence harus berada dalam radius lokasi yang sesuai. Check-In Dinas meminta bukti foto dan menunggu persetujuan Admin.</p>
-        <div class="callout danger"><b>Jaga tautan:</b> tautan presensi adalah kredensial pekerja. Jangan bagikan kepada orang lain. Rotasi salt oleh Admin membatalkan semua tautan lama.</div>
+        <h3>Tab lainnya</h3>
+        <p><b>Pengajuan</b> untuk izin/cuti/sakit; <b>Riwayat</b> meninjau catatan; <b>Pelaporan</b> menampilkan informasi bahwa timesheet belum tersedia; <b>Akun</b> mengubah foto profil dan nomor telepon.</p>
       </div>
     </div>
-    <div class="callout warn">Pemeriksaan lokasi web adalah best-effort: browser tidak dapat membuktikan bahwa koordinat berasal dari GPS asli. Anti-Mock Location bukan jaminan anti-spoofing.</div>
-    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>07 / 09</strong></div>
+    <div class="callout warn">Geofence dan Anti-Mock Location membantu pemeriksaan sesuai konfigurasi, tetapi browser tidak dapat membuktikan bahwa koordinat berasal dari GPS asli. Fitur ini bukan jaminan anti-spoofing.</div>
+    <div class="callout danger"><b>Jaga tautan portal:</b> tautan/token perusahaan dapat digunakan untuk mencapai portal. Jangan meneruskan tautan kepada pihak lain; laporkan jika tersebar.</div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>08 / 10</strong></div>
   </section>
 
   <section class="page">
@@ -277,17 +309,17 @@
     <p class="eyebrow">PENGATURAN</p>
     <h2>Atur akun, dokumen, dan keamanan presensi</h2>
     <figure class="image-frame compact">
-      <img src="./panduan-05-pengaturan.png" alt="Pengaturan dokumen dengan data simulasi">
+      <img src="./panduan%20old/panduan-05-pengaturan.png" alt="Pengaturan dokumen dengan data simulasi">
       <figcaption>Pengaturan dokumen: ambang default, katalog jenis dokumen, serta ambang per jenis. Data fiktif.</figcaption>
     </figure>
     <div class="cols">
       <div class="card"><h3>Profil & keamanan</h3><p>Semua pengguna dapat mengubah nama/foto profil, memilih tema, serta mengganti kata sandi dengan verifikasi kata sandi lama. Kata sandi baru minimal 12 karakter.</p></div>
-      <div class="card"><h3>Jenis dokumen</h3><p>Admin membuat dan mengelola katalog perusahaan. Ambang default 1–365 hari; nilai per jenis dapat mengikuti default atau menggunakan override sendiri.</p></div>
-      <div class="card"><h3>Pengaturan presensi</h3><p>Admin mengelola lokasi/geofence dan opsi Anti-Mock Location. Pastikan peta, radius, dan aktivitas yang diwajibkan sesuai kebijakan kerja.</p></div>
+      <div class="card"><h3>Jenis dokumen</h3><p>Admin membuat dan mengelola katalog serta ambang pemantauan 1–365 hari. Dokumen pekerja tidak wajib dan dapat dicatat kemudian.</p></div>
+      <div class="card"><h3>Presensi & portal</h3><p>Admin mengelola lokasi/geofence, tautan portal, dan opsi Anti-Mock Location. UUID lock/reset tersedia per pekerja pada tabel menu Presensi.</p></div>
       <div class="card"><h3>Manajemen user</h3><p>Admin membuat akun Admin, HR Staff, atau Viewer. Buat akun seperlunya dan berikan peran dengan hak minimum yang dibutuhkan.</p></div>
     </div>
     <div class="callout danger"><b>Rotasi salt:</b> membatalkan seluruh tautan presensi yang sudah diterbitkan. Siapkan distribusi tautan baru sebelum mengonfirmasi rotasi.</div>
-    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>08 / 09</strong></div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>09 / 10</strong></div>
   </section>
 
   <section class="page">
@@ -299,7 +331,7 @@
       <tbody>
         <tr><td>Melihat dashboard dan data operasional tenant</td><td>Ya</td><td>Ya</td><td>Ya</td></tr>
         <tr><td>Membuat pekerja dan mencatat dokumen</td><td>Ya</td><td>Ya</td><td>Tidak</td></tr>
-        <tr><td>Mengubah/mengarsipkan pekerja atau mengubah status</td><td>Ya</td><td>Tidak</td><td>Tidak</td></tr>
+        <tr><td>Menghapus/arsip pekerja atau mengubah status</td><td>Ya</td><td>Tidak</td><td>Tidak</td></tr>
         <tr><td>Membuat tautan presensi</td><td>Ya</td><td>Ya</td><td>Tidak</td></tr>
         <tr><td>Setuju/tolak klaim dan mengelola pengaturan perusahaan</td><td>Ya</td><td>Tidak</td><td>Tidak</td></tr>
         <tr><td>Riwayat aktivitas</td><td>Ya</td><td>Ya</td><td>Tidak</td></tr>
@@ -313,7 +345,7 @@
           <li><b>Presensi ditolak:</b> cek izin lokasi, sinyal, status pekerja, aktivitas, dan radius.</li>
           <li><b>Pengajuan tidak terlihat:</b> pilih bulan yang sesuai tanggal klaim.</li>
           <li><b>Pekerja belum dapat aktif:</b> tinjau transisi status, nomor pekerja, dan kuota paket. Dokumen tidak menjadi syarat aktivasi.</li>
-          <li><b>Tautan tidak berlaku:</b> minta Admin memeriksa status dan menerbitkan ulang tautan.</li>
+          <li><b>Tautan/perangkat tidak berlaku:</b> minta Admin memeriksa status dan kunci UUID; reset UUID bila perlu.</li>
           <li><b>Impor bermasalah:</b> cek template, format tanggal, kode dokumen, dan duplikasi.</li>
         </ul>
       </div>
@@ -322,14 +354,14 @@
         <ul class="tight">
           <li>Kelayakan dokumen adalah rekomendasi; Admin tetap menentukan status pekerja.</li>
           <li>Jadwal shift dan hitung keterlambatan otomatis belum tersedia.</li>
-          <li>Undangan email dan unggah file dokumen pekerja belum termasuk alur saat ini.</li>
+          <li>Lampiran dokumen baru/perpanjangan bersifat opsional; tindak lanjut dan status tetap dicatat tanpa lampiran.</li>
           <li>Pengingat dokumen ditampilkan di aplikasi, bukan notifikasi otomatis ke email.</li>
         </ul>
       </div>
     </div>
     <div class="callout danger"><b>Lindungi data:</b> jangan membagikan kata sandi, token/link presensi, bukti foto, atau screenshot yang memuat data pribadi. Simpan hanya data yang diperlukan; jangan masukkan hasil medis rinci MCU.</div>
     <p class="small">Tangkapan layar internal dalam panduan ini menggunakan data fiktif dan diberi label “Data Simulasi”. Fitur/akses dapat berbeda sesuai versi aplikasi, konfigurasi perusahaan, dan role akun.</p>
-    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>09 / 09</strong></div>
+    <div class="page-footer"><span>Panduan Pengguna · rusakparah.web.id</span><strong>10 / 10</strong></div>
   </section>
 </body>
 </html>
