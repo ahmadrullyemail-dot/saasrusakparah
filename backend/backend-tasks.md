@@ -34,7 +34,8 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [x] **Bangun presensi pekerja** — Salt tenant dan link HMAC statis, validasi worker aktif/tenant, check-in/out dengan geolokasi tervalidasi, status izin/sakit/tidak hadir, dan rekap HRD per tanggal.
 - [x] **Tambahkan geofence dan approval presensi** — Lokasi tenant, aturan aktivitas/radius dengan validasi Haversine server-side, pengajuan Off/Izin/Cuti/Sakit, bukti Dinas JPG/PNG di MySQL, dan persetujuan HR.
 - [x] **Tambahkan Anti-Mock Location best-effort** — Preferensi tenant Admin, validasi sinyal mock/akurasi/kecepatan request dan pemeriksaan lompatan lokasi terhadap riwayat; bukan GPS attestation dan perlu aplikasi native untuk jaminan kuat.
-- [ ] **Tambah upload dan pengelolaan berkas** — Tentukan penyimpanan, akses, enkripsi, retensi, serta kebijakan data sensitif sebelum menyimpan salinan dokumen.
+- [x] **Tambah upload dan perpanjangan dokumen** — Admin/HR Staff dapat membuat catatan dokumen valid baru dari dokumen terbaru, mengunggah JPG/PNG maksimal 900 KiB ke BLOB MySQL privat, menyimpan catatan referensi, dan mengunduh lampiran melalui endpoint tenant-scoped; dokumen lama dipertahankan sebagai riwayat.
+- [ ] **Tentukan enkripsi dan retensi lampiran** — Tetapkan enkripsi-at-rest dan masa retensi untuk salinan dokumen sensitif sebelum hardening produksi.
 - [ ] **Tambah pengingat masa berlaku** — Implementasikan setelah ambang waktu, penerima, dan kanal notifikasi disepakati.
 - [ ] **Tambah aturan dokumen berdasarkan posisi/client** — Kelola template persyaratan setelah variasi per client dan posisi dikonfirmasi.
 - [ ] **Tambah undangan dan izin terperinci** — Dukung alur undangan HRD/client dan matriks izin lebih granular dari role dasar MVP.
