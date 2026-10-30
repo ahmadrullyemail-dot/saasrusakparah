@@ -99,6 +99,7 @@ async function initializeDatabase() {
       email_hash BINARY(32) NULL,
       position VARCHAR(150) NOT NULL,
       worker_number VARCHAR(50) NULL,
+      uuid_lock_enabled TINYINT(1) NOT NULL DEFAULT 1,
       phone_number VARCHAR(30) NULL,
       profile_photo_data MEDIUMBLOB NULL,
       profile_photo_mime_type VARCHAR(32) NULL,
@@ -449,6 +450,7 @@ async function initializeDatabase() {
 
   const workerColumns = [
     ['worker_number', 'VARCHAR(50) NULL'],
+    ['uuid_lock_enabled', 'TINYINT(1) NOT NULL DEFAULT 1'],
     ['phone_number', 'VARCHAR(30) NULL'],
     ['profile_photo_data', 'MEDIUMBLOB NULL'],
     ['profile_photo_mime_type', 'VARCHAR(32) NULL'],

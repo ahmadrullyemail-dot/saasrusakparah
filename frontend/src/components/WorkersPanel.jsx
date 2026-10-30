@@ -1,7 +1,7 @@
 import { StatusBadge } from './StatCard.jsx';
 import { Icon } from './Icon.jsx';
 
-export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkbook, filter, handleImportWorkers, openEditWorker, resetWorkerPortalSession, selectedId, setFilter, setSelectedId, setWorkerSearch, showError, subscription, user, visibleWorkers, workerImportInputRef, workerImportResult, workerQuotaFull, workerSearch, workers }) {
+export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkbook, filter, handleImportWorkers, openEditWorker, resetWorkerPortalSession, selectedId, setFilter, setSelectedId, setWorkerSearch, showError, subscription, user, updateWorkerUuidLock, uuidLockBusy, visibleWorkers, workerImportInputRef, workerImportResult, workerQuotaFull, workerSearch, workers }) {
   const canManagePortalSessions = user.role === 'admin' || user.role === 'hr_manager';
   const hasActions = canManagePortalSessions;
   return (
@@ -131,15 +131,34 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                               </>
                             )}
                             {canManagePortalSessions && (
-                              <button
-                                className="button secondary small-action"
-                                type="button"
-                                disabled={busy || worker.status !== 'active' || !worker.worker_number}
-                                onClick={() => resetWorkerPortalSession(worker.id)}
-                                title={!worker.worker_number ? 'Tetapkan nomor pekerja terlebih dahulu' : undefined}
-                              >
-                                <Icon name="refresh" size={15} /> Reset UUID
-                              </button>
+                              <>
+                                <label
+                                  className="switch-control uuid-lock-control"
+                                  title="Jika nonaktif, UUID klien yang hilang atau berbeda akan diganti saat verifikasi nomor pekerja."
+                                >
+                                  <span>Kunci UUID</span>
+                                  <input
+                                    type="checkbox"
+                                    role="switch"
+                                    aria-label={`Kunci UUID untuk ${worker.full_name}`}
+                                    checked={Boolean(worker.uuid_lock_enabled)}
+                                    disabled={busy || Boolean(uuidLockBusy[worker.id])}
+                                    onChange={(event) => updateWorkerUuidLock(worker.id, event.target.checked)}
+                                  />
+                                  <span className="switch-track" aria-hidden="true"><span /></span>
+                                  <span>{worker.uuid_lock_enabled ? 'Aktif' : 'Nonaktif'}</span>
+                                  {uuidLockBusy[worker.id] && <span className="attendance-spinner uuid-lock-spinner" role="status" aria-label="Menyimpan perubahan" />}
+                                </label>
+                                <button
+                                  className="button secondary small-action"
+                                  type="button"
+                                  disabled={busy || Boolean(uuidLockBusy[worker.id]) || worker.status !== 'active' || !worker.worker_number}
+                                  onClick={() => resetWorkerPortalSession(worker.id)}
+                                  title={!worker.worker_number ? 'Tetapkan nomor pekerja terlebih dahulu' : undefined}
+                                >
+                                  <Icon name="refresh" size={15} /> Reset UUID
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>

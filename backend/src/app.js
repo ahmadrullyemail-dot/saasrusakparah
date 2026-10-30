@@ -407,6 +407,14 @@ function validWorkerNumber(value) {
     && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value.trim());
 }
 
+function validUuidLockEnabled(value) {
+  return typeof value === 'boolean';
+}
+
+function shouldRejectPortalUuidMismatch(uuidLockEnabled, activeSessionCount, matchingSession) {
+  return Boolean(uuidLockEnabled) && activeSessionCount > 0 && !matchingSession;
+}
+
 function normalizeWorkerNumber(value) {
   return value.trim();
 }
@@ -649,7 +657,7 @@ function redactWorkerForViewer(worker, role) {
 
 async function getWorker(tenantId, workerId, connection = pool, lock = false) {
   const [rows] = await connection.execute(
-    `SELECT id, tenant_id, full_name, email, email_hash, position, worker_number, phone_number,
+    `SELECT id, tenant_id, full_name, email, email_hash, position, worker_number, uuid_lock_enabled, phone_number,
             profile_photo_updated_at, national_id, address, department, placement_client,
             work_location, contract_type, offer_date, join_date, salary_rate, status,
             required_document_types, deleted_at, scheduled_inactive_date, created_at, updated_at
@@ -730,7 +738,8 @@ app.post('/api/public/portal/verify', asyncRoute(async (req, res) => {
   const { company_token: companyToken, worker_number: workerNumber, client_uuid: clientUuidInput } = req.body || {};
   if (typeof companyToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(companyToken)
     || typeof workerNumber !== 'string' || !validWorkerNumber(workerNumber)
-    || (clientUuidInput != null && clientUuidInput !== '' && !validAttendanceToken(clientUuidInput))) {
+    || (clientUuidInput != null && typeof clientUuidInput !== 'string')
+    || (typeof clientUuidInput === 'string' && clientUuidInput.length > 128)) {
     return res.status(400).json({ error: 'Masukkan nomor pekerja dan UUID perangkat yang valid.' });
   }
   const connection = await pool.getConnection();
@@ -738,7 +747,7 @@ app.post('/api/public/portal/verify', asyncRoute(async (req, res) => {
   try {
     await connection.beginTransaction();
     const [workers] = await connection.execute(
-      `SELECT w.id AS worker_id, w.tenant_id, w.full_name
+      `SELECT w.id AS worker_id, w.tenant_id, w.full_name, w.uuid_lock_enabled
          FROM tenant_attendance_settings settings
          JOIN workers w ON w.tenant_id = settings.tenant_id
         WHERE settings.company_portal_token_hash = ?
@@ -765,7 +774,7 @@ app.post('/api/public/portal/verify', asyncRoute(async (req, res) => {
     );
     const matchingSession = findMatchingPortalSession(sessions, clientUuidInput);
 
-    if (sessions.length && !matchingSession) {
+    if (shouldRejectPortalUuidMismatch(worker.uuid_lock_enabled, sessions.length, matchingSession)) {
       await connection.rollback();
       return res.status(409).json({
         error: 'UUID perangkat tidak cocok. Minta Admin atau HR Staff mereset UUID jika perangkat ini perlu didaftarkan ulang.',
@@ -785,6 +794,13 @@ app.post('/api/public/portal/verify', asyncRoute(async (req, res) => {
       };
     } else {
       const newClientUuid = crypto.randomUUID();
+      if (sessions.length) {
+        await connection.execute(
+          `UPDATE worker_portal_sessions SET revoked_at = CURRENT_TIMESTAMP
+            WHERE tenant_id = ? AND worker_id = ? AND revoked_at IS NULL`,
+          [worker.tenant_id, worker.worker_id]
+        );
+      }
       await connection.execute(
         `INSERT INTO worker_portal_sessions (tenant_id, worker_id, token_hash, last_seen_at)
          VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
@@ -793,8 +809,15 @@ app.post('/api/public/portal/verify', asyncRoute(async (req, res) => {
       await connection.execute(
         `INSERT INTO audit_events
            (tenant_id, user_id, actor_name, actor_role, action, entity_type, entity_id, description)
-         VALUES (?, NULL, ?, 'worker', 'create', 'worker_portal_session', ?, 'UUID perangkat portal diterbitkan melalui verifikasi nomor pekerja.')`,
-        [worker.tenant_id, worker.full_name, String(worker.worker_id)]
+         VALUES (?, NULL, ?, 'worker', 'create', 'worker_portal_session', ?, ?)`,
+        [
+          worker.tenant_id,
+          worker.full_name,
+          String(worker.worker_id),
+          worker.uuid_lock_enabled
+            ? 'UUID perangkat portal diterbitkan melalui verifikasi nomor pekerja.'
+            : 'UUID perangkat portal diterbitkan atau diperbarui karena Kunci UUID dinonaktifkan.',
+        ]
       );
       responseData = {
         worker_id: String(worker.worker_id),
@@ -2905,7 +2928,7 @@ app.get('/api/workers', asyncRoute(async (req, res) => {
   if (status && !WORKER_STATUSES.has(status)) {
     return res.status(400).json({ error: 'Invalid worker status' });
   }
-  const query = `SELECT id, tenant_id, full_name, email, email_hash, position, worker_number, phone_number,
+  const query = `SELECT id, tenant_id, full_name, email, email_hash, position, worker_number, uuid_lock_enabled, phone_number,
                         profile_photo_updated_at, national_id, address, department, placement_client,
                         work_location, contract_type, offer_date, join_date, salary_rate, status,
                         required_document_types, deleted_at, scheduled_inactive_date, created_at, updated_at
@@ -2916,12 +2939,54 @@ app.get('/api/workers', asyncRoute(async (req, res) => {
     const documents = await listWorkerDocuments(req.auth.tenantId, worker.id);
     return {
       ...redactWorkerForViewer(worker, req.auth.role),
+      uuid_lock_enabled: Boolean(worker.uuid_lock_enabled),
       required_document_types: parseRequiredDocuments(worker.required_document_types),
       documents,
       eligibility: evaluateEligibility(worker, documents),
     };
   }));
   res.json({ data });
+}));
+
+app.put('/api/workers/:id/uuid-lock', requireManager, asyncRoute(async (req, res) => {
+  const { enabled } = req.body || {};
+  if (!validWorkerId(req.params.id) || !validUuidLockEnabled(enabled)) {
+    return res.status(400).json({ error: 'Provide a valid worker ID and boolean UUID lock state' });
+  }
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const worker = await getWorker(req.auth.tenantId, req.params.id, connection, true);
+    if (!worker) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Worker not found' });
+    }
+    if (Boolean(worker.uuid_lock_enabled) === enabled) {
+      await connection.commit();
+      return res.json({
+        data: { worker_id: String(worker.id), uuid_lock_enabled: enabled },
+      });
+    }
+    await connection.execute(
+      'UPDATE workers SET uuid_lock_enabled = ? WHERE id = ? AND tenant_id = ?',
+      [enabled ? 1 : 0, worker.id, req.auth.tenantId]
+    );
+    await recordAudit(req, {
+      action: 'update',
+      entityType: 'worker_uuid_lock',
+      entityId: worker.id,
+      description: `Kunci UUID untuk pekerja "${worker.full_name}" ${enabled ? 'diaktifkan' : 'dinonaktifkan'}.`,
+    }, connection);
+    await connection.commit();
+    res.json({
+      data: { worker_id: String(worker.id), uuid_lock_enabled: enabled },
+    });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }));
 
 app.post('/api/workers/:id/portal-session/reset', requireManager, asyncRoute(async (req, res) => {
@@ -3087,6 +3152,7 @@ app.post('/api/workers', requireManager, asyncRoute(async (req, res) => {
   res.status(201).json({
     data: {
       ...redactWorkerForViewer(worker, req.auth.role),
+      uuid_lock_enabled: Boolean(worker.uuid_lock_enabled),
       required_document_types: parseRequiredDocuments(worker.required_document_types),
       eligibility: evaluateEligibility(worker, []),
     },
@@ -3243,6 +3309,7 @@ app.get('/api/workers/:id', asyncRoute(async (req, res) => {
   res.json({
     data: {
       ...redactWorkerForViewer(worker, req.auth.role),
+      uuid_lock_enabled: Boolean(worker.uuid_lock_enabled),
       required_document_types: parseRequiredDocuments(worker.required_document_types),
       documents,
       history,
@@ -3822,6 +3889,8 @@ module.exports = {
   findMatchingPortalSession,
   validWorkerId,
   validWorkerNumber,
+  validUuidLockEnabled,
+  shouldRejectPortalUuidMismatch,
   normalizeWorkerNumber,
   validCoordinates,
   distanceInMeters,

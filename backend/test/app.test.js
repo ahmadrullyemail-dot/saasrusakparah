@@ -41,6 +41,8 @@ const {
   findMatchingPortalSession,
   validWorkerId,
   validWorkerNumber,
+  validUuidLockEnabled,
+  shouldRejectPortalUuidMismatch,
   normalizeWorkerNumber,
   validCoordinates,
   distanceInMeters,
@@ -404,6 +406,18 @@ test('worker numbers accept the documented format and normalize surrounding whit
   assert.equal(validWorkerNumber('EMP 001'), false);
   assert.equal(validWorkerNumber('A'.repeat(51)), false);
   assert.equal(validWorkerNumber(1001), false);
+});
+
+test('UUID lock enforces mismatches only when enabled', () => {
+  assert.equal(validUuidLockEnabled(true), true);
+  assert.equal(validUuidLockEnabled(false), true);
+  assert.equal(validUuidLockEnabled(1), false);
+  assert.equal(validUuidLockEnabled('false'), false);
+
+  assert.equal(shouldRejectPortalUuidMismatch(true, 1, null), true);
+  assert.equal(shouldRejectPortalUuidMismatch(true, 1, { id: 1 }), false);
+  assert.equal(shouldRejectPortalUuidMismatch(true, 0, null), false);
+  assert.equal(shouldRejectPortalUuidMismatch(false, 1, null), false);
 });
 
 test('anti-mock movement heuristic rejects physically implausible location jumps', () => {

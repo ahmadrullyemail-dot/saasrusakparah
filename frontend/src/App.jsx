@@ -17,6 +17,7 @@ function WorkspaceApp() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [sessionError, setSessionError] = useState('');
   const [workers, setWorkers] = useState([]);
+  const [uuidLockBusy, setUuidLockBusy] = useState({});
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const [departmentOptions, setDepartmentOptions] = useState([]);
@@ -371,6 +372,35 @@ function WorkspaceApp() {
       return false;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function updateWorkerUuidLock(workerId, enabled) {
+    if (!enabled && !window.confirm(
+      'Menonaktifkan Kunci UUID mengizinkan siapa pun yang mengetahui nomor pekerja untuk mendaftarkan perangkat dan mengganti UUID. Lanjutkan hanya setelah memahami risikonya.'
+    )) {
+      return;
+    }
+    setUuidLockBusy((current) => ({ ...current, [workerId]: true }));
+    setError('');
+    setNotice('');
+    try {
+      const { uuid_lock_enabled: savedValue } = await api(`/workers/${workerId}/uuid-lock`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      });
+      setWorkers((current) => current.map((worker) => (
+        worker.id === workerId ? { ...worker, uuid_lock_enabled: savedValue } : worker
+      )));
+      setNotice(`Kunci UUID ${savedValue ? 'diaktifkan' : 'dinonaktifkan'} untuk pekerja.`);
+    } catch (requestError) {
+      showError(requestError);
+    } finally {
+      setUuidLockBusy((current) => {
+        const next = { ...current };
+        delete next[workerId];
+        return next;
+      });
     }
   }
 
@@ -1726,6 +1756,8 @@ function WorkspaceApp() {
           workerQuotaFull={workerQuotaFull}
           workerSearch={workerSearch}
           resetWorkerPortalSession={resetWorkerPortalSession}
+          uuidLockBusy={uuidLockBusy}
+          updateWorkerUuidLock={updateWorkerUuidLock}
           workers={workers}
         />
 
