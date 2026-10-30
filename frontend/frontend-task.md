@@ -34,6 +34,7 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [x] **Standarkan ikon antarmuka** — Gunakan Lucide React dengan gaya outline dan ukuran konsisten pada navigasi, dashboard, landing page, aksi utama, status, menu pengaturan, dan portal presensi; kontrol ikon-only tetap memiliki nama aksesibel.
 - [x] **Bangun halaman dan rekap presensi** — Halaman mobile `Presensi.jsx` dengan profil, jam WIB realtime, log hari ini, riwayat presensi dan pengajuan bulanan, autentikasi UUID perangkat, clock in/out geolokasi, rekap HRD, dan pengaturan tautan portal perusahaan.
 - [x] **Tampilkan tautan portal perusahaan di menu Presensi** — Admin dapat menyalin tautan kapan saja; backend menyimpan token terenkripsi agar dapat dipulihkan setelah reload, sementara nilai hash tetap digunakan untuk verifikasi.
+- [x] **Sederhanakan autentikasi portal pekerja** — Hilangkan kolom UUID pada UI; UUID tetap dimuat dari `localStorage` dan dikirim ke backend otomatis bersama nomor pekerja.
 - [x] **Kelola geofence dan persetujuan presensi** — Peta Leaflet lokasi/radius/checkbox aktivitas, pengajuan Dinas dengan bukti gambar, serta tindakan persetujuan HR di rekap.
 - [x] **Tambah Anti-Mock Location best-effort** — Switch Admin dan pemeriksaan mock flag, akurasi, serta kecepatan di portal; batas deteksi browser dijelaskan pada UI.
 - [ ] **Tambah upload dan pratinjau dokumen** — Tunggu keputusan penyimpanan, izin akses, enkripsi, dan retensi.

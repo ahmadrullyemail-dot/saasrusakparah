@@ -600,7 +600,7 @@ export default function Presensi() {
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalError, setPortalError] = useState('');
   const [workerNumberInput, setWorkerNumberInput] = useState('');
-  const [clientUuidInput, setClientUuidInput] = useState('');
+  const [clientUuid, setClientUuid] = useState('');
   const [busy, setBusy] = useState(false);
   const [deletingToday, setDeletingToday] = useState(false);
   const [locationChecking, setLocationChecking] = useState(false);
@@ -670,7 +670,7 @@ export default function Presensi() {
         setWorkerNumberInput(savedSession.worker_number);
       }
       const savedUuid = savedSession.client_uuid || savedSession.session_token;
-      if (typeof savedUuid === 'string') setClientUuidInput(savedUuid);
+      if (typeof savedUuid === 'string') setClientUuid(savedUuid);
     }
     setPortalChecking(false);
     setLoading(false);
@@ -721,20 +721,20 @@ export default function Presensi() {
     setPortalBusy(true);
     setPortalError('');
     try {
-      const { worker_id: verifiedWorkerId, client_uuid: clientUuid } = await publicPortalRequest('verify', {
+      const { worker_id: verifiedWorkerId, client_uuid: verifiedClientUuid } = await publicPortalRequest('verify', {
         company_token: companyToken,
         worker_number: workerNumberInput.trim(),
-        client_uuid: clientUuidInput.trim(),
+        client_uuid: clientUuid.trim(),
       });
       const savedSession = {
-        client_uuid: clientUuid,
+        client_uuid: verifiedClientUuid,
         worker_number: workerNumberInput.trim(),
         worker_id: verifiedWorkerId,
       };
       window.localStorage.setItem(portalSessionStorageKey, JSON.stringify(savedSession));
-      setClientUuidInput(clientUuid);
+      setClientUuid(verifiedClientUuid);
       setLoading(true);
-      setPortalAuth({ companyToken, token: clientUuid, workerId: verifiedWorkerId });
+      setPortalAuth({ companyToken, token: verifiedClientUuid, workerId: verifiedWorkerId });
       setPortalError('');
     } catch (requestError) {
       setPortalError(requestError.message);
@@ -1132,7 +1132,7 @@ export default function Presensi() {
             <span className="attendance-state-icon"><Icon name="warning" /></span>
             <h1>{companyToken ? 'Verifikasi akses pekerja' : 'Tautan perusahaan tidak valid'}</h1>
             <p>{companyToken
-              ? 'Masukkan nomor pekerja. UUID perangkat yang tersimpan di browser akan terisi otomatis; perangkat baru akan menerima UUID setelah nomor pekerja diverifikasi.'
+              ? 'Masukkan nomor pekerja. Perangkat dikenali otomatis menggunakan UUID yang tersimpan di browser; UUID baru dibuat saat perangkat belum terdaftar.'
               : portalError || 'Gunakan tautan portal resmi dari HR perusahaan.'}</p>
             {companyToken && (
               <form className="attendance-enrollment-form" onSubmit={verifyPortalDevice}>
@@ -1143,17 +1143,6 @@ export default function Presensi() {
                     required
                     maxLength={50}
                     autoComplete="username"
-                    disabled={portalBusy}
-                  />
-                </label>
-                <label className="attendance-form-field">UUID perangkat
-                  <input
-                    value={clientUuidInput}
-                    onChange={(event) => setClientUuidInput(event.target.value.trim())}
-                    maxLength={36}
-                    pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
-                    autoComplete="off"
-                    placeholder="Otomatis dibuat pada perangkat baru"
                     disabled={portalBusy}
                   />
                 </label>
