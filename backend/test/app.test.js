@@ -12,9 +12,6 @@ const {
   findLeaveAttendanceConflictDate,
   leaveAttachmentMimeType,
   safeLeaveAttachmentName,
-  safeDocumentAttachmentName,
-  validDocumentRenewalInput,
-  validDocumentRenewalActivation,
   leaveAttachmentStoragePath,
   validDocumentWarningThreshold,
   attendanceMonthRange,
@@ -37,7 +34,6 @@ const {
   validProfilePhotoUrl,
   profilePhotoMimeType,
   MAX_PROFILE_PHOTO_BYTES,
-  MAX_DOCUMENT_ATTACHMENT_BYTES,
   validAttendanceToken,
   hashAttendanceToken,
   encryptCompanyPortalToken,
@@ -238,25 +234,6 @@ test('document dates are normalized by selected status', () => {
   assert.equal(documentDateFields('valid', { valid_from: '2027-01-01', valid_until: '2026-01-01' }), null);
 });
 
-test('document renewal validates a future expiry date and optional bounded note', () => {
-  const today = '2026-03-26';
-  assert.equal(validDocumentRenewalInput({ valid_until: '2027-03-26' }, today), true);
-  assert.equal(validDocumentRenewalInput({ valid_until: '2026-03-26' }, today), false);
-  assert.equal(validDocumentRenewalInput({ valid_until: '2026-02-30' }, today), false);
-  assert.equal(validDocumentRenewalInput({ valid_until: '2027-03-26', reference_note: '  REF-123  ' }, today), true);
-  assert.equal(validDocumentRenewalInput({ valid_until: '2027-03-26', reference_note: 'x'.repeat(501) }, today), false);
-  assert.equal(safeDocumentAttachmentName('../../MCU report.exe', 'image/png'), 'MCU_report.png');
-  assert.equal(safeDocumentAttachmentName('renewal.jpg', 'image/jpeg'), 'renewal.jpg');
-});
-
-test('only an uploaded renewal awaiting review with a future expiry can be activated', () => {
-  const renewal = { status: 'pending', valid_until: '2027-03-26', has_attachment: 1 };
-  assert.equal(validDocumentRenewalActivation(renewal, '2026-03-26'), true);
-  assert.equal(validDocumentRenewalActivation({ ...renewal, has_attachment: 0 }, '2026-03-26'), false);
-  assert.equal(validDocumentRenewalActivation({ ...renewal, status: 'valid' }, '2026-03-26'), false);
-  assert.equal(validDocumentRenewalActivation({ ...renewal, valid_until: '2026-03-26' }, '2026-03-26'), false);
-});
-
 test('contact and salary validation accepts supported worker details', () => {
   assert.equal(validPhoneNumber('+62 812-3456-7890'), true);
   assert.equal(validPhoneNumber('12'), false);
@@ -367,7 +344,6 @@ test('leave attachment uploads are signature-checked and stored under private ra
 
 test('profile photo storage stays below legacy MariaDB packet limits', () => {
   assert.equal(MAX_PROFILE_PHOTO_BYTES, 900 * 1024);
-  assert.equal(MAX_DOCUMENT_ATTACHMENT_BYTES, 900 * 1024);
   assert.ok(MAX_PROFILE_PHOTO_BYTES < 1024 * 1024);
 });
 

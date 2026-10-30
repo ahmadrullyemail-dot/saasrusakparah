@@ -160,10 +160,6 @@ async function initializeDatabase() {
       valid_from DATE NULL,
       valid_until DATE NULL,
       target_completion_date DATE NULL,
-      attachment_data MEDIUMBLOB NULL,
-      attachment_mime_type VARCHAR(32) NULL,
-      attachment_file_name VARCHAR(255) NULL,
-      reference_note VARCHAR(500) NULL,
       deleted_at DATETIME NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -555,18 +551,6 @@ async function initializeDatabase() {
   );
   if (!existingDocumentColumns.some(({ COLUMN_NAME }) => COLUMN_NAME === 'target_completion_date')) {
     await pool.query('ALTER TABLE documents ADD COLUMN target_completion_date DATE NULL');
-  }
-  if (!existingDocumentColumns.some(({ COLUMN_NAME }) => COLUMN_NAME === 'attachment_data')) {
-    await pool.query('ALTER TABLE documents ADD COLUMN attachment_data MEDIUMBLOB NULL');
-  }
-  if (!existingDocumentColumns.some(({ COLUMN_NAME }) => COLUMN_NAME === 'attachment_mime_type')) {
-    await pool.query('ALTER TABLE documents ADD COLUMN attachment_mime_type VARCHAR(32) NULL');
-  }
-  if (!existingDocumentColumns.some(({ COLUMN_NAME }) => COLUMN_NAME === 'attachment_file_name')) {
-    await pool.query('ALTER TABLE documents ADD COLUMN attachment_file_name VARCHAR(255) NULL');
-  }
-  if (!existingDocumentColumns.some(({ COLUMN_NAME }) => COLUMN_NAME === 'reference_note')) {
-    await pool.query('ALTER TABLE documents ADD COLUMN reference_note VARCHAR(500) NULL');
   }
   if (!existingDocumentColumns.some(({ COLUMN_NAME }) => COLUMN_NAME === 'deleted_at')) {
     await pool.query('ALTER TABLE documents ADD COLUMN deleted_at DATETIME NULL');

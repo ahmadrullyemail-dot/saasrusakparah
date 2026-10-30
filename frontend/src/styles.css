@@ -192,10 +192,7 @@ h3 { margin-bottom: 11px; font-size: 14px; }
 .dashboard-document-heading-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; }
 .dashboard-document-list { margin: 0; padding: 0; list-style: none; }
 .dashboard-document-list li + li { border-top: 1px solid var(--line); }
-.dashboard-document-row { display: flex; align-items: center; gap: 8px; padding-right: 14px; }
 .dashboard-document-item { display: flex; width: 100%; align-items: center; gap: 12px; padding: 12px 20px; border: 0; color: var(--ink); background: transparent; text-align: left; transition: background .15s ease; }
-.dashboard-document-row .dashboard-document-item { min-width: 0; flex: 1; }
-.dashboard-renew-button { flex: 0 0 auto; }
 .dashboard-document-item:hover { background: #f8f9ff; }
 .dashboard-document-item:focus-visible { position: relative; outline: 2px solid var(--primary); outline-offset: -3px; }
 .dashboard-document-indicator { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; background: #d89a3d; box-shadow: 0 0 0 4px #d89a3d1c; }
@@ -2216,28 +2213,10 @@ input:focus, select:focus, textarea:focus {
 }
 .leave-review-note small { color: var(--muted); font-size: 10px; font-weight: 400; }
 .leave-review-actions { display: flex; justify-content: flex-end; gap: 9px; }
-.document-renewal-modal { max-height: min(90vh, 760px); overflow-y: auto; }
-.document-renewal-field { display: grid; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 650; }
-.document-renewal-field .modal-control {
-  width: 100%;
-  min-height: 40px;
-  padding: 9px 11px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--panel);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-}
-.document-renewal-field textarea { resize: vertical; }
-.document-renewal-field small { color: var(--muted); font-size: 10px; font-weight: 400; line-height: 1.5; }
 @media (max-width: 520px) {
   .leave-review-modal { padding: 19px; }
   .leave-review-actions { flex-direction: column-reverse; }
   .leave-review-actions .button { width: 100%; }
-  .dashboard-document-row { gap: 4px; padding-right: 8px; }
-  .dashboard-document-row .dashboard-document-item { gap: 7px; padding-right: 5px; padding-left: 10px; }
-  .dashboard-renew-button { padding: 7px; font-size: 9px; }
 }
 .attendance-history-month {
   display: grid;
