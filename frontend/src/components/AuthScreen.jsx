@@ -192,15 +192,6 @@ export function AuthScreen({ onAuthenticated, initialError }) {
               <li>Pembaruan data dashboard dan presensi melalui sinkronisasi real-time.</li>
             </ul>
           </article>
-          <article className="changelog-release">
-            <div className="changelog-release-meta"><span className="changelog-version">VERSI 1.0.0</span><span>Fondasi produk</span></div>
-            <h3>Siklus pekerja dan dokumen HR</h3>
-            <ul>
-              <li>Kelola tahapan offering, pra-aktif, aktif, dan nonaktif.</li>
-              <li>Katalog pemantauan dokumen, status kelengkapan, dan riwayat aktivitas.</li>
-              <li>Autentikasi perusahaan, peran pengguna, serta impor dan ekspor pekerja.</li>
-            </ul>
-          </article>
         </div>
       </section>
 
