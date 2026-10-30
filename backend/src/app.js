@@ -2721,7 +2721,8 @@ app.get('/api/dashboard', asyncRoute(async (req, res) => {
          ON dt.tenant_id = d.tenant_id AND dt.code = d.type
       WHERE d.tenant_id = ? AND d.deleted_at IS NULL
         AND d.superseded_by_document_id IS NULL
-        AND ((d.status = 'valid'
+        AND (d.status IN ('pending', 'rejected')
+          OR (d.status = 'valid'
           AND d.valid_until <= DATE_ADD(UTC_DATE(), INTERVAL COALESCE(dt.warning_threshold_days, ?) DAY))
           OR d.status = 'expired')`,
     [req.auth.tenantId, warningThresholdDays]
@@ -3705,10 +3706,8 @@ app.post(
         [req.params.documentId, worker.id, req.auth.tenantId]
       );
       const sourceDocument = documents[0];
-      const renewableStatus = sourceDocument && (
-        ['valid', 'expired'].includes(sourceDocument.status)
-        || (sourceDocument.renewed_from_document_id != null && ['pending', 'rejected'].includes(sourceDocument.status))
-      );
+      const renewableStatus = sourceDocument
+        && ['valid', 'expired', 'pending', 'rejected'].includes(sourceDocument.status);
       if (!renewableStatus) {
         await connection.rollback();
         return res.status(404).json({ error: 'Dokumen aktif untuk diperpanjang tidak ditemukan.' });

@@ -38,7 +38,7 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [x] **Tambahkan Kunci UUID per pekerja** — Admin/HR Staff dapat mengganti switch dan mereset UUID langsung pada setiap baris tabel Presensi; mode nonaktif merotasi sesi saat UUID klien hilang/berbeda untuk pemulihan `localStorage` iOS.
 - [x] **Kelola geofence dan persetujuan presensi** — Peta Leaflet lokasi/radius/checkbox aktivitas, pengajuan Dinas dengan bukti gambar, serta tindakan persetujuan HR di rekap.
 - [x] **Tambah Anti-Mock Location best-effort** — Switch Admin dan pemeriksaan mock flag, akurasi, serta kecepatan di portal; batas deteksi browser dijelaskan pada UI.
-- [x] **Tambah alur perpanjangan dokumen** — Modal menerima status menunggu pemeriksaan (target selesai), valid (tanggal mulai/akhir), atau ditolak (keterangan wajib); lampiran JPG/PNG/PDF bersifat opsional hingga 5 MB. Lampiran opsional juga tersedia saat mencatat dokumen baru.
+- [x] **Tambah alur perpanjangan dokumen** — Modal menerima status menunggu pemeriksaan (target selesai), valid (tanggal mulai/akhir), atau ditolak (keterangan wajib); lampiran JPG/PNG/PDF bersifat opsional hingga 5 MB. Dokumen pending selalu masuk tindak lanjut; penolakan tetap ditampilkan sampai HR meninjau status pekerja setelah masa berlaku dokumen habis. Lampiran opsional juga tersedia saat mencatat dokumen baru.
 - [ ] **Tambah pratinjau dan kebijakan lifecycle berkas** — Tetapkan pratinjau aman, enkripsi at-rest, dan retensi untuk lampiran dokumen.
 - [ ] **Tambah pengingat dan filter masa berlaku** — Setelah aturan waktu tindak lanjut disepakati.
 - [ ] **Tambah undangan dan izin terperinci** — Lengkapi manajemen MVP dengan proses undangan dan matriks izin yang lebih granular.

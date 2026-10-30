@@ -1265,27 +1265,81 @@ function WorkspaceApp() {
     ? selectedWorker
     : null;
 
-  const expiringDocuments = useMemo(() => workers.flatMap((worker) => (
-    (worker.documents || [])
+  const expiringDocuments = useMemo(() => workers.flatMap((worker) => {
+    const documents = worker.documents || [];
+    const documentsById = new Map(documents.map((document) => [String(document.id), document]));
+    const inheritedValidUntil = (document) => {
+      let source = document;
+      const visited = new Set();
+      while (source && !source.valid_until && source.renewed_from_document_id) {
+        const sourceId = String(source.renewed_from_document_id);
+        if (visited.has(sourceId)) break;
+        visited.add(sourceId);
+        source = documentsById.get(sourceId);
+      }
+      return source?.valid_until || null;
+    };
+    const startDate = summary?.document_warning_start_date || localDateString();
+
+    return documents
       .filter((document) => {
-      if (document.superseded_by_document_id) return false;
-      if (!document.valid_until || !['valid', 'expired'].includes(document.status)) return false;
+        if (document.superseded_by_document_id) return false;
+        if (['pending', 'rejected'].includes(document.status)) return true;
         if (document.status === 'expired') return true;
+        const validUntil = document.valid_until;
+        if (!validUntil || document.status !== 'valid') return false;
+        if (validUntil < startDate) return true;
         const threshold = documentTypes.find((type) => type.code === document.type)?.warning_threshold_days
           ?? summary?.document_warning_threshold_days
           ?? 30;
-        const startDate = summary?.document_warning_start_date || localDateString();
-        return document.valid_until <= addDaysToDate(startDate, threshold);
+        return validUntil <= addDaysToDate(startDate, threshold);
       })
-      .map((document) => ({
-        ...document,
-        worker_id: worker.id,
-        warning_threshold_days: documentTypes.find((type) => type.code === document.type)?.warning_threshold_days
+      .map((document) => {
+        const warningThresholdDays = documentTypes.find((type) => type.code === document.type)?.warning_threshold_days
           ?? summary?.document_warning_threshold_days
-          ?? 30,
-        worker_name: worker.full_name,
-      }))
-  )).sort((left, right) => left.valid_until.localeCompare(right.valid_until)), [workers, documentTypes, summary?.document_warning_start_date, summary?.document_warning_threshold_days]);
+          ?? 30;
+        const validUntil = document.valid_until || inheritedValidUntil(document);
+        const expired = document.status === 'expired' || Boolean(validUntil && validUntil < startDate);
+        let followUpLabel;
+        let followUpDate;
+        let followUpDateLabel;
+        if (document.status === 'pending') {
+          followUpLabel = 'Menunggu pemeriksaan';
+          followUpDate = document.target_completion_date || validUntil;
+          followUpDateLabel = document.target_completion_date ? 'Target selesai' : validUntil ? 'Berlaku hingga' : '';
+        } else if (document.status === 'rejected') {
+          followUpLabel = expired
+            ? 'Ditolak · dokumen kedaluwarsa — tinjau status pekerja'
+            : validUntil ? 'Ditolak' : 'Ditolak · perlu tindak lanjut';
+          followUpDate = validUntil;
+          followUpDateLabel = validUntil ? 'Berlaku hingga' : '';
+        } else if (expired) {
+          followUpLabel = 'Kedaluwarsa';
+          followUpDate = validUntil;
+          followUpDateLabel = 'Berakhir';
+        } else {
+          followUpLabel = `Segera kedaluwarsa · ambang ${warningThresholdDays} hari`;
+          followUpDate = validUntil;
+          followUpDateLabel = 'Berakhir';
+        }
+        return {
+          ...document,
+          worker_id: worker.id,
+          worker_name: worker.full_name,
+          warning_threshold_days: warningThresholdDays,
+          valid_until: validUntil,
+          expired,
+          follow_up_label: followUpLabel,
+          follow_up_date: followUpDate,
+          follow_up_date_label: followUpDateLabel,
+        };
+      });
+  }).sort((left, right) => {
+    const statusPriority = { rejected: 0, pending: 1, expired: 2, valid: 3 };
+    const priority = (statusPriority[left.status] ?? 4) - (statusPriority[right.status] ?? 4);
+    if (priority) return priority;
+    return (left.follow_up_date || '9999-12-31').localeCompare(right.follow_up_date || '9999-12-31');
+  }), [workers, documentTypes, summary?.document_warning_start_date, summary?.document_warning_threshold_days]);
 
   function openDocumentFollowUp(document) {
       const worker = workers.find((candidate) => String(candidate.id) === String(document.worker_id));
@@ -1676,7 +1730,7 @@ function WorkspaceApp() {
               <div>
                 <p className="eyebrow">TINDAK LANJUT DOKUMEN</p>
                 <h3 id="dashboard-documents-heading">Masa berlaku</h3>
-                <p className="muted">Dokumen kedaluwarsa atau memasuki ambang peringatan perusahaan.</p>
+                <p className="muted">Dokumen kedaluwarsa, mendekati masa berlaku, atau masih menunggu pemeriksaan/ditindaklanjuti.</p>
               </div>
               <div className="dashboard-document-heading-actions">
                 <span className={`count-pill ${expiringDocuments.length ? 'pending-count' : ''}`}>
@@ -1690,8 +1744,7 @@ function WorkspaceApp() {
             {expiringDocuments.length ? (
               <ul className="dashboard-document-list">
                 {expiringDocuments.slice(0, 5).map((document) => {
-                  const warningStartDate = summary?.document_warning_start_date || localDateString();
-                  const expired = document.status === 'expired' || document.valid_until < warningStartDate;
+                  const expired = document.expired;
                   return (
                     <li key={`${document.worker_id}-${document.id}`}>
                       <div className="dashboard-document-row">
@@ -1707,24 +1760,28 @@ function WorkspaceApp() {
                             <small>
                               <span className="uppercase-text">{documentTypeName(document.type, documentTypes)}</span>
                               {' · '}
-                              <span className={expired ? 'dashboard-document-expired' : 'dashboard-document-upcoming'}>
-                                {expired ? 'Kedaluwarsa' : `Segera kedaluwarsa · ambang ${document.warning_threshold_days} hari`}
+                              <span className={expired || document.status === 'rejected' ? 'dashboard-document-expired' : 'dashboard-document-upcoming'}>
+                                {document.follow_up_label}
                               </span>
                             </small>
                           </span>
-                          <span className="dashboard-document-date">
-                            <small>Berakhir</small>
-                            <time dateTime={document.valid_until}>{new Date(`${document.valid_until}T00:00:00`).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</time>
-                          </span>
+                          {document.follow_up_date && (
+                            <span className="dashboard-document-date">
+                              <small>{document.follow_up_date_label}</small>
+                              <time dateTime={document.follow_up_date}>{new Date(`${document.follow_up_date}T00:00:00`).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</time>
+                            </span>
+                          )}
                           <span className="dashboard-document-open"><Icon name="arrowRight" size={16} /></span>
                         </button>
                         {user.role !== 'viewer' && (
                           <button
                             className="button secondary small-action dashboard-document-renew"
                             type="button"
-                            onClick={() => openRenewalForm(document)}
+                            onClick={() => document.status === 'rejected' && expired
+                              ? openDocumentFollowUp(document)
+                              : openRenewalForm(document)}
                           >
-                            Perpanjang
+                            {document.status === 'pending' ? 'Proses' : document.status === 'rejected' && expired ? 'Tinjau pekerja' : 'Perpanjang'}
                           </button>
                         )}
                       </div>
@@ -1735,7 +1792,7 @@ function WorkspaceApp() {
             ) : (
               <div className="dashboard-document-empty">
                 <Icon name="checkCircle" />
-                <p>Tidak ada dokumen yang kedaluwarsa atau memasuki ambang peringatan saat ini.</p>
+                <p>Tidak ada dokumen yang perlu ditinjau saat ini.</p>
               </div>
             )}
             {expiringDocuments.length > 5 && (
@@ -2136,23 +2193,23 @@ function WorkspaceApp() {
                 <div className="expiry-list">
                   {expiringDocuments.map((document) => (
                     <div className="expiry-item" key={`${document.id}-${document.worker_id}`}>
-                      <span className={`expiry-dot ${document.valid_until < (summary?.document_warning_start_date || localDateString()) ? 'expired' : ''}`} />
-                      <span><strong className="uppercase-text">{document.worker_name}</strong><small><span className="uppercase-text">{documentTypeName(document.type, documentTypes)}</span> · {document.valid_until < (summary?.document_warning_start_date || localDateString()) ? 'Kedaluwarsa' : `Segera kedaluwarsa · ambang ${document.warning_threshold_days} hari`} · berakhir {new Date(`${document.valid_until}T00:00:00`).toLocaleDateString('id-ID')}</small></span>
+                      <span className={`expiry-dot ${document.expired || document.status === 'rejected' ? 'expired' : ''}`} />
+                      <span><strong className="uppercase-text">{document.worker_name}</strong><small><span className="uppercase-text">{documentTypeName(document.type, documentTypes)}</span> · {document.follow_up_label}{document.follow_up_date ? ` · ${document.follow_up_date_label.toLowerCase()} ${new Date(`${document.follow_up_date}T00:00:00`).toLocaleDateString('id-ID')}` : ''}</small></span>
                       {user.role !== 'viewer' && (
                         <button
                           className="button secondary small-action"
                           type="button"
-                          onClick={() => {
-                            openRenewalForm(document);
-                          }}
+                          onClick={() => document.status === 'rejected' && document.expired
+                            ? openDocumentFollowUp(document)
+                            : openRenewalForm(document)}
                         >
-                          Perpanjang
+                          {document.status === 'pending' ? 'Proses' : document.status === 'rejected' && document.expired ? 'Tinjau pekerja' : 'Perpanjang'}
                         </button>
                       )}
                     </div>
                   ))}
                 </div>
-              ) : <p className="muted">Tidak ada dokumen kedaluwarsa atau yang memasuki ambang peringatannya.</p>}
+              ) : <p className="muted">Tidak ada dokumen yang perlu ditinjau saat ini.</p>}
             </section>
           </div>
         </section>

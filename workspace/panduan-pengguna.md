@@ -92,10 +92,10 @@ Hak akses diperiksa di backend, bukan hanya dengan menyembunyikan tombol pada an
 Dashboard menampilkan enam metrik:
 
 - **Offering** — pekerja pada tahap offering.
-- **Pra-aktif** — pekerja yang sedang melengkapi persyaratan sebelum aktif.
+- **Pra-aktif** — pekerja dalam proses onboarding sebelum aktif.
 - **Aktif** — pekerja dengan status aktif.
 - **Nonaktif** — pekerja dengan status nonaktif.
-- **Dokumen perlu tindak lanjut** — dokumen yang masuk ambang peringatan efektif atau sudah kedaluwarsa.
+- **Dokumen perlu tindak lanjut** — dokumen yang menunggu pemeriksaan, ditolak, masuk ambang peringatan efektif, atau sudah kedaluwarsa.
 - **Klaim presensi pending** — klaim yang masih menunggu keputusan.
 
 Metrik bersumber dari backend. Saat terjadi perubahan operasional, aplikasi menyegarkan dashboard secara real-time melalui koneksi Socket.IO. Ringkasan juga diperbarui berkala sebagai fallback saat halaman Ringkasan dibuka.
@@ -266,7 +266,7 @@ Pencatatan dokumen menyesuaikan status:
 - **Valid/Kedaluwarsa** — mencatat rentang tanggal berlaku.
 - **Ditolak** — ditampilkan tanpa tanggal berlaku.
 
-Catatan terbaru per jenis digunakan untuk menampilkan status pemantauan. Dokumen yang belum ada, tidak valid, atau kedaluwarsa tidak menghalangi aktivasi pekerja. Dokumen dapat dicatat kapan saja; dashboard dan daftar tindak lanjut menggunakan ambang peringatan efektif per jenis dan menampilkan dokumen kedaluwarsa.
+Catatan terbaru per jenis digunakan untuk menampilkan status pemantauan. Dokumen yang belum ada, tidak valid, atau kedaluwarsa tidak menghalangi aktivasi pekerja. Dokumen dapat dicatat kapan saja; dashboard dan daftar tindak lanjut selalu menampilkan status menunggu pemeriksaan, serta status ditolak sampai dokumen kedaluwarsa dan HR meninjau status pekerja. Kedaluwarsa setelah penolakan tidak menonaktifkan pekerja secara otomatis. Dokumen valid mengikuti ambang peringatan efektif per jenis dan tetap ditampilkan setelah kedaluwarsa.
 
 > [Placeholder screenshot — Profil pekerja dan panel dokumen]
 >
