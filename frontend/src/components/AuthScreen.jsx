@@ -170,8 +170,7 @@ export function AuthScreen({ onAuthenticated, initialError }) {
             <ul>
               <li>Daftar tindak lanjut dokumen merangkum sisa masa berlaku, target pemeriksaan, dan aksi yang sesuai status.</li>
               <li>Status menunggu pemeriksaan dan ditolak tetap terlihat untuk membantu HR meninjau dokumen serta status pekerja.</li>
-              <li>Aksi Hapus pekerja kini memakai modal konfirmasi dengan verifikasi ketik; data tetap diarsipkan, bukan dihapus permanen.</li>
-              <li>Landing page dilengkapi metadata SEO, schema SoftwareApplication, robots.txt, dan sitemap halaman utama.</li>
+              <li>Aksi Hapus pekerja kini memakai modal konfirmasi dengan verifikasi ketik.</li>
             </ul>
           </article>
           <article className="changelog-release">
