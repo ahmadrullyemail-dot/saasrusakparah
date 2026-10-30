@@ -32,7 +32,8 @@ Status: `Todo` · Prioritas: `P0` (MVP) / `P1` (lanjutan)
 - [x] **Sediakan pilihan tema lokal** — Standard, Dark, dan Compact/Clean disimpan per browser.
 - [x] **Rapikan sistem visual dan responsivitas** — Terapkan tipografi Inter dengan fallback sistem lokal, hierarki teks, whitespace, kartu/bentuk tombol konsisten, status soft-badge, pencarian dokumen yang jelas, dan breakpoint mobile tanpa menambah framework styling baru.
 - [x] **Standarkan ikon antarmuka** — Gunakan Lucide React dengan gaya outline dan ukuran konsisten pada navigasi, dashboard, landing page, aksi utama, status, menu pengaturan, dan portal presensi; kontrol ikon-only tetap memiliki nama aksesibel.
-- [x] **Bangun halaman dan rekap presensi** — Halaman mobile `Presensi.jsx` dengan profil, jam WIB realtime, log hari ini, riwayat 30 hari, navigasi bawah, link HMAC statis, check-in/out geolokasi, rekap HRD, dan pengaturan salt Admin.
+- [x] **Bangun halaman dan rekap presensi** — Halaman mobile `Presensi.jsx` dengan profil, jam WIB realtime, log hari ini, riwayat presensi dan pengajuan bulanan, autentikasi UUID perangkat, clock in/out geolokasi, rekap HRD, dan pengaturan tautan portal perusahaan.
+- [x] **Tampilkan tautan portal perusahaan di menu Presensi** — Admin dapat menyalin tautan kapan saja; backend menyimpan token terenkripsi agar dapat dipulihkan setelah reload, sementara nilai hash tetap digunakan untuk verifikasi.
 - [x] **Kelola geofence dan persetujuan presensi** — Peta Leaflet lokasi/radius/checkbox aktivitas, pengajuan Dinas dengan bukti gambar, serta tindakan persetujuan HR di rekap.
 - [x] **Tambah Anti-Mock Location best-effort** — Switch Admin dan pemeriksaan mock flag, akurasi, serta kecepatan di portal; batas deteksi browser dijelaskan pada UI.
 - [ ] **Tambah upload dan pratinjau dokumen** — Tunggu keputusan penyimpanan, izin akses, enkripsi, dan retensi.

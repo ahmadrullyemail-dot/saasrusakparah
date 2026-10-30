@@ -27,6 +27,7 @@ function WorkspaceApp() {
   const [attendanceData, setAttendanceData] = useState({ attendance_date: '', records: [] });
   const [monthlyAttendance, setMonthlyAttendance] = useState({ month: '', days_in_month: 0, records: [] });
   const [companyPortalLink, setCompanyPortalLink] = useState('');
+  const [companyPortalLinkNeedsRotation, setCompanyPortalLinkNeedsRotation] = useState(false);
   const [attendanceStatusDrafts, setAttendanceStatusDrafts] = useState({});
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [monthlyAttendanceLoading, setMonthlyAttendanceLoading] = useState(false);
@@ -253,6 +254,31 @@ function WorkspaceApp() {
   }, [activeTab, attendanceDate, user]);
 
   useEffect(() => {
+    if (!user || user.role !== 'admin' || activeTab !== 'attendance') return;
+    if (!attendanceSettings.company_portal_configured) {
+      setCompanyPortalLink('');
+      setCompanyPortalLinkNeedsRotation(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCompanyPortalLink('');
+    setCompanyPortalLinkNeedsRotation(false);
+    api('/admin/attendance-settings/company-token')
+      .then(({ company_token: companyToken, needs_rotation: needsRotation }) => {
+        if (cancelled) return;
+        if (companyToken) {
+          setCompanyPortalLink(`${window.location.origin}/portal?company_token=${encodeURIComponent(companyToken)}`);
+        }
+        setCompanyPortalLinkNeedsRotation(Boolean(needsRotation));
+      })
+      .catch((requestError) => {
+        if (!cancelled) showError(requestError);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, attendanceSettings.company_portal_configured, user]);
+
+  useEffect(() => {
     if (!user || activeTab !== 'attendance') return;
     setMonthlyAttendanceLoading(true);
     api(`/attendance/month?month=${encodeURIComponent(attendanceMonth)}`)
@@ -361,6 +387,7 @@ function WorkspaceApp() {
       const companyPortalLink = `${window.location.origin}/portal?company_token=${encodeURIComponent(companyToken)}`;
       setAttendanceSettings((current) => ({ ...current, ...updatedSettings }));
       setCompanyPortalLink(companyPortalLink);
+      setCompanyPortalLinkNeedsRotation(false);
       setNotice('Tautan portal perusahaan berhasil dibuat. Bagikan tautan tersebut kepada pekerja untuk verifikasi nomor pekerja.');
       return true;
     } catch (requestError) {
@@ -1712,6 +1739,7 @@ function WorkspaceApp() {
           attendancePageSize={attendancePageSize}
           attendanceSettings={attendanceSettings}
           companyPortalLink={companyPortalLink}
+          companyPortalLinkNeedsRotation={companyPortalLinkNeedsRotation}
           attendanceStatusDrafts={attendanceStatusDrafts}
           attendanceSearch={attendanceSearch}
           busy={busy}

@@ -1,7 +1,7 @@
 import { attendanceMonthLabel, attendanceMonthSummary, attendanceStatusLabel, formatAttendanceTime, formatCoordinate, monthlyAttendanceCode } from '../lib/hrd.js';
 import { Icon } from './Icon.jsx';
 
-export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, companyPortalLink, attendanceStatusDrafts, attendanceSearch, busy, copyToClipboard, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, resetWorkerPortalSession, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance }) {
+export function AttendancePanel({ activeTab, attendanceDate, attendanceData, attendanceLoading, attendanceMonth, attendancePage, attendancePageSize, attendanceSettings, companyPortalLink, companyPortalLinkNeedsRotation, attendanceStatusDrafts, attendanceSearch, busy, copyToClipboard, decideAttendanceRequest, decideLeaveRequest, openLeaveRejection, filteredMonthlyWorkers, monthlyAttendanceLoading, monthlyCheckedIns, monthlyDays, monthlyPageCount, monthlyWorkerRows, pendingAttendanceApprovals, pendingLeaveRequests, pendingLeaveRequestsLoading, reviewingAttendance, saveAttendanceStatus, resetWorkerPortalSession, selectMatrixAttendanceDate, setAttendanceDate, setAttendanceMonth, setAttendancePage, setAttendancePageSize, setAttendanceSearch, setReviewingAttendance, totalMonthlyLogs, user, visibleMonthlyWorkers, archiveAttendance }) {
   return (
 <section
           className="panel attendance-panel"
@@ -250,6 +250,11 @@ export function AttendancePanel({ activeTab, attendanceDate, attendanceData, att
               <input id="attendance-company-portal-link" readOnly value={companyPortalLink} />
               <button className="button secondary" type="button" onClick={() => copyToClipboard(companyPortalLink)}>Salin tautan</button>
             </div>
+          )}
+          {user.role === 'admin' && companyPortalLinkNeedsRotation && (
+            <p className="attendance-salt-warning">
+              Tautan yang sudah ada hanya tersimpan sebagai hash dan tidak bisa ditampilkan kembali. Rotasikan tautan portal satu kali melalui Pengaturan Presensi; setelah itu tautan dapat disalin kapan saja dari menu ini.
+            </p>
           )}
           <p className="muted attendance-link-note">Koordinat berasal dari browser perangkat dan tidak membuktikan lokasi secara anti-spoofing.</p>
           {!attendanceSettings.company_portal_configured && <p className="attendance-salt-warning">Tautan portal perusahaan belum dibuat. Admin dapat membuatnya melalui Pengaturan → Pengaturan Presensi.</p>}

@@ -194,6 +194,7 @@ async function initializeDatabase() {
       tenant_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
       token_salt BINARY(32) NULL,
       company_portal_token_hash BINARY(32) NULL,
+      company_portal_token_encrypted VARBINARY(128) NULL,
       anti_mock_location_enabled TINYINT(1) NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -331,6 +332,9 @@ async function initializeDatabase() {
   }
   if (!attendanceSettingColumnMap.has('company_portal_token_hash')) {
     await pool.query('ALTER TABLE tenant_attendance_settings ADD COLUMN company_portal_token_hash BINARY(32) NULL');
+  }
+  if (!attendanceSettingColumnMap.has('company_portal_token_encrypted')) {
+    await pool.query('ALTER TABLE tenant_attendance_settings ADD COLUMN company_portal_token_encrypted VARBINARY(128) NULL');
   }
   if (!attendanceSettingColumnMap.has('anti_mock_location_enabled')) {
     await pool.query(

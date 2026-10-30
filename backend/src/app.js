@@ -564,6 +564,45 @@ function hashCompanyPortalToken(token) {
   return crypto.createHash('sha256').update(token, 'ascii').digest();
 }
 
+function companyPortalTokenEncryptionKey() {
+  return Buffer.from(crypto.hkdfSync(
+    'sha256',
+    getJwtSecret(),
+    Buffer.from('saasrusakparah-company-portal-token'),
+    Buffer.from('aes-256-gcm'),
+    32
+  ));
+}
+
+function encryptCompanyPortalToken(token) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', companyPortalTokenEncryptionKey(), iv);
+  cipher.setAAD(Buffer.from('company-portal-token:v1'));
+  const ciphertext = Buffer.concat([cipher.update(token, 'ascii'), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]);
+}
+
+function decryptCompanyPortalToken(encryptedToken) {
+  if (!Buffer.isBuffer(encryptedToken) || encryptedToken.length < 29) {
+    throw new Error('Stored company portal token ciphertext is invalid');
+  }
+  const decipher = crypto.createDecipheriv(
+    'aes-256-gcm',
+    companyPortalTokenEncryptionKey(),
+    encryptedToken.subarray(0, 12)
+  );
+  decipher.setAAD(Buffer.from('company-portal-token:v1'));
+  decipher.setAuthTag(encryptedToken.subarray(12, 28));
+  const token = Buffer.concat([
+    decipher.update(encryptedToken.subarray(28)),
+    decipher.final(),
+  ]).toString('ascii');
+  if (!hashCompanyPortalToken(token)) {
+    throw new Error('Decrypted company portal token is invalid');
+  }
+  return token;
+}
+
 async function findWorkerForAttendanceToken(workerId, token, connection = pool, lock = false) {
   if (!validWorkerId(workerId) || !validAttendanceToken(token)) return null;
   const [rows] = await connection.execute(
@@ -1985,6 +2024,21 @@ app.get('/api/admin/attendance-settings', requireAdmin, asyncRoute(async (req, r
   });
 }));
 
+app.get('/api/admin/attendance-settings/company-token', requireAdmin, asyncRoute(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT company_portal_token_encrypted
+       FROM tenant_attendance_settings
+      WHERE tenant_id = ? AND company_portal_token_hash IS NOT NULL`,
+    [req.auth.tenantId]
+  );
+  const encryptedToken = rows[0]?.company_portal_token_encrypted;
+  res.set('Cache-Control', 'no-store');
+  if (!encryptedToken) {
+    return res.json({ data: { company_token: null, needs_rotation: Boolean(rows[0]) } });
+  }
+  res.json({ data: { company_token: decryptCompanyPortalToken(encryptedToken), needs_rotation: false } });
+}));
+
 app.patch('/api/admin/attendance-settings', requireAdmin, asyncRoute(async (req, res) => {
   const { anti_mock_location_enabled: enabled } = req.body || {};
   if (typeof enabled !== 'boolean') {
@@ -2103,10 +2157,14 @@ app.post('/api/admin/attendance-settings/company-token', requireAdmin, asyncRout
   try {
     await connection.beginTransaction();
     await connection.execute(
-      `INSERT INTO tenant_attendance_settings (tenant_id, company_portal_token_hash)
-       VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE company_portal_token_hash = VALUES(company_portal_token_hash), updated_at = CURRENT_TIMESTAMP`,
-      [req.auth.tenantId, hashCompanyPortalToken(companyToken)]
+      `INSERT INTO tenant_attendance_settings
+         (tenant_id, company_portal_token_hash, company_portal_token_encrypted)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         company_portal_token_hash = VALUES(company_portal_token_hash),
+         company_portal_token_encrypted = VALUES(company_portal_token_encrypted),
+         updated_at = CURRENT_TIMESTAMP`,
+      [req.auth.tenantId, hashCompanyPortalToken(companyToken), encryptCompanyPortalToken(companyToken)]
     );
     await connection.execute(
       `UPDATE worker_portal_sessions SET revoked_at = CURRENT_TIMESTAMP
@@ -3759,6 +3817,8 @@ module.exports = {
   MAX_PROFILE_PHOTO_BYTES,
   validAttendanceToken,
   hashAttendanceToken,
+  encryptCompanyPortalToken,
+  decryptCompanyPortalToken,
   findMatchingPortalSession,
   validWorkerId,
   validWorkerNumber,

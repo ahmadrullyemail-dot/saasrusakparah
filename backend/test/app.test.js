@@ -36,6 +36,8 @@ const {
   MAX_PROFILE_PHOTO_BYTES,
   validAttendanceToken,
   hashAttendanceToken,
+  encryptCompanyPortalToken,
+  decryptCompanyPortalToken,
   findMatchingPortalSession,
   validWorkerId,
   validWorkerNumber,
@@ -357,6 +359,23 @@ test('worker portal sessions use UUIDv4 tokens stored as hashes', () => {
   assert.equal(findMatchingPortalSession([session], sessionToken.toUpperCase()), session);
   assert.equal(findMatchingPortalSession([session], anotherSessionToken), null);
   assert.equal(findMatchingPortalSession([session], ''), null);
+});
+
+test('company portal tokens can be recovered only from authenticated ciphertext', () => {
+  const previousJwtSecret = process.env.JWT_SECRET;
+  process.env.JWT_SECRET = 'test-secret-with-at-least-32-characters';
+  try {
+    const companyToken = 'A'.repeat(43);
+    const encryptedToken = encryptCompanyPortalToken(companyToken);
+    assert.equal(encryptedToken.length, 71);
+    assert.equal(decryptCompanyPortalToken(encryptedToken), companyToken);
+    const tamperedToken = Buffer.from(encryptedToken);
+    tamperedToken[tamperedToken.length - 1] ^= 1;
+    assert.throws(() => decryptCompanyPortalToken(tamperedToken));
+  } finally {
+    if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
+    else process.env.JWT_SECRET = previousJwtSecret;
+  }
 });
 
 test('attendance validates worker IDs and geolocation coordinates', () => {
