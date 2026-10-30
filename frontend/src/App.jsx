@@ -52,6 +52,8 @@ function WorkspaceApp() {
   const [pendingLeaveRequestsLoading, setPendingLeaveRequestsLoading] = useState(false);
   const [leaveRejectionRequest, setLeaveRejectionRequest] = useState(null);
   const [leaveRejectionNote, setLeaveRejectionNote] = useState('');
+  const [archiveWorkerTarget, setArchiveWorkerTarget] = useState(null);
+  const [archiveWorkerConfirmation, setArchiveWorkerConfirmation] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -1115,16 +1117,24 @@ function WorkspaceApp() {
     }
   }
 
+  function requestArchiveWorker(worker) {
+    if (user.role !== 'admin') return;
+    setArchiveWorkerTarget(typeof worker === 'object' ? worker : workers.find((item) => String(item.id) === String(worker)));
+    setArchiveWorkerConfirmation('');
+  }
+
   async function archiveWorker(workerId) {
-    if (user.role !== 'admin' || !window.confirm('Arsipkan pekerja ini? Data dan riwayat terkait tetap disimpan, sesi portal perangkat akan dicabut.')) return;
+    if (user.role !== 'admin') return;
     setBusy(true);
     setError('');
     setNotice('');
     try {
       await api(`/workers/${encodeURIComponent(workerId)}`, { method: 'DELETE' });
       if (selectedId === workerId) setSelectedId(null);
+      setArchiveWorkerTarget(null);
+      setArchiveWorkerConfirmation('');
       await reloadData();
-      setNotice('Pekerja diarsipkan. Data terkait tetap tersimpan.');
+      setNotice('Data pekerja dihapus dari daftar. Riwayat dan data terkait tetap tersimpan.');
     } catch (requestError) {
       showError(requestError);
     } finally {
@@ -1505,6 +1515,77 @@ function WorkspaceApp() {
               >
                 <Icon name="plus" size={17} /> Tambah Pekerja
               </button>
+            )}
+            {archiveWorkerTarget && (
+              <div
+                className="modal-backdrop confirmation-backdrop"
+                role="presentation"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget && !busy) {
+                    setArchiveWorkerTarget(null);
+                    setArchiveWorkerConfirmation('');
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && !busy) {
+                    setArchiveWorkerTarget(null);
+                    setArchiveWorkerConfirmation('');
+                  }
+                }}
+              >
+                <section
+                  className="confirmation-modal"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="archive-worker-confirm-title"
+                  aria-describedby="archive-worker-confirm-description"
+                >
+                  <div className="confirmation-modal-heading">
+                    <span className="confirmation-warning-icon" aria-hidden="true"><Icon name="warning" size={18} /></span>
+                    <div>
+                      <p className="eyebrow">KONFIRMASI HAPUS</p>
+                      <h2 id="archive-worker-confirm-title">Hapus pekerja?</h2>
+                    </div>
+                  </div>
+                  <p className="confirmation-modal-description" id="archive-worker-confirm-description">
+                    Data <strong className="uppercase-text">{archiveWorkerTarget.full_name}</strong> akan diarsipkan dari daftar. Data dan riwayat terkait tetap tersimpan, sementara sesi portal pekerja dicabut. Ketik <strong>hapus</strong> untuk melanjutkan.
+                  </p>
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (archiveWorkerConfirmation === 'hapus') archiveWorker(archiveWorkerTarget.id);
+                    }}
+                  >
+                    <label className="confirmation-input-label" htmlFor="archive-worker-confirmation">
+                      Ketik <strong>hapus</strong> untuk mengonfirmasi
+                      <input
+                        id="archive-worker-confirmation"
+                        autoFocus
+                        autoComplete="off"
+                        value={archiveWorkerConfirmation}
+                        onChange={(event) => setArchiveWorkerConfirmation(event.target.value)}
+                        disabled={busy}
+                      />
+                    </label>
+                    <div className="confirmation-modal-actions">
+                      <button
+                        className="button secondary"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setArchiveWorkerTarget(null);
+                          setArchiveWorkerConfirmation('');
+                        }}
+                      >
+                        Batal
+                      </button>
+                      <button className="button danger" type="submit" disabled={busy || archiveWorkerConfirmation !== 'hapus'}>
+                        {busy ? 'Memproses…' : 'Hapus'}
+                      </button>
+                    </div>
+                  </form>
+                </section>
+              </div>
             )}
             {workerQuotaFull && <span className="worker-quota-topbar-note" role="status">Kuota pekerja paket Free penuh</span>}
             <div className="user-chip">
@@ -1941,7 +2022,7 @@ function WorkspaceApp() {
 
         <WorkersPanel
           activeTab={activeTab}
-          archiveWorker={archiveWorker}
+          archiveWorker={requestArchiveWorker}
           busy={busy}
           createWorkerWorkbook={createWorkerWorkbook}
           filter={filter}
@@ -2154,7 +2235,7 @@ function WorkspaceApp() {
                       <button className="button danger" disabled={busy || !scheduledInactiveDate} onClick={() => changeStatus('inactive', scheduledInactiveDate)}>Jadwalkan nonaktif</button>
                     </div>
                   )}
-                  <button className="button danger" disabled={busy} onClick={() => archiveWorker(selectedProfileWorker.id)}>Arsipkan pekerja</button>
+                  <button className="button danger" disabled={busy} onClick={() => requestArchiveWorker(selectedProfileWorker)}>Hapus pekerja</button>
                 </div>}
                 {selectedProfileWorker.history?.length > 0 && (
                   <div className="history-line">

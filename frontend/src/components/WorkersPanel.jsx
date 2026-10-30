@@ -126,7 +126,7 @@ export function WorkersPanel({ activeTab, archiveWorker, busy, createWorkerWorkb
                             {user.role === 'admin' && (
                               <>
                                 <button className="button secondary small-action" type="button" disabled={busy} onClick={() => openEditWorker(worker)}><Icon name="pencil" size={15} /> Edit</button>
-                                <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveWorker(worker.id)}><Icon name="archive" size={15} /> Arsipkan</button>
+                                <button className="button danger small-action" type="button" disabled={busy} onClick={() => archiveWorker(worker)}><Icon name="trash" size={15} /> Hapus</button>
                               </>
                             )}
                           </div>
